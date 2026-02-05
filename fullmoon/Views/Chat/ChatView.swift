@@ -6,6 +6,7 @@
 //
 
 import MarkdownUI
+import OSLog
 import SwiftUI
 
 struct ChatView: View {
@@ -25,6 +26,10 @@ struct ChatView: View {
     @State private var generatingThreadID: UUID?
     @State private var displayedTitle: String = "chat"
     @State private var titleOpacity: Double = 1.0
+    private static let titleLogger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "fullmoon",
+        category: "TitleGeneration"
+    )
 
     var isPromptEmpty: Bool {
         prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -368,23 +373,48 @@ struct ChatView: View {
 
     private func startTitleGenerationIfNeeded(for thread: Thread) {
         let existingTitle = thread.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard existingTitle.isEmpty else { return }
+        if !existingTitle.isEmpty {
+            Self.titleLogger.debug(
+                "Skipping title generation for thread=\(thread.id.uuidString, privacy: .public); existing title=\(existingTitle, privacy: .public)"
+            )
+            return
+        }
 
         let threadID = thread.id
         let fallback = fallbackTitle(for: thread)
         if let fallback, !fallback.isEmpty {
+            Self.titleLogger.debug(
+                "Applying immediate fallback title for thread=\(threadID.uuidString, privacy: .public): \(fallback, privacy: .public)"
+            )
             thread.title = fallback
             try? modelContext.save()
+        } else {
+            Self.titleLogger.debug(
+                "No fallback title available for thread=\(threadID.uuidString, privacy: .public)"
+            )
         }
 
         Task {
+            Self.titleLogger.info(
+                "Starting title generation thread=\(threadID.uuidString, privacy: .public) source=\(appManager.currentModelSource.rawValue, privacy: .public)"
+            )
             let rawTitle: String
             switch appManager.currentModelSource {
             case .local:
-                guard let modelName = appManager.currentModelName else { return }
+                guard let modelName = appManager.currentModelName else {
+                    Self.titleLogger.error(
+                        "Title generation aborted thread=\(threadID.uuidString, privacy: .public); missing local model"
+                    )
+                    return
+                }
                 rawTitle = await llm.generateTitle(modelName: modelName, thread: thread, systemPrompt: titleSystemPrompt)
             case .cloud:
-                guard let modelName = appManager.currentCloudModelName else { return }
+                guard let modelName = appManager.currentCloudModelName else {
+                    Self.titleLogger.error(
+                        "Title generation aborted thread=\(threadID.uuidString, privacy: .public); missing cloud model"
+                    )
+                    return
+                }
                 rawTitle = await llm.generateCloudTitle(
                     modelName: modelName,
                     thread: thread,
@@ -394,17 +424,40 @@ struct ChatView: View {
                 )
             }
 
-            guard let normalizedTitle = normalizeTitle(rawTitle), isMeaningfulGeneratedTitle(normalizedTitle) else { return }
+            Self.titleLogger.debug(
+                "Raw title response thread=\(threadID.uuidString, privacy: .public) chars=\(rawTitle.count, privacy: .public) preview=\(previewForLog(rawTitle), privacy: .public)"
+            )
+
+            guard let normalizedTitle = normalizeTitle(rawTitle) else {
+                Self.titleLogger.debug(
+                    "Normalized title is empty for thread=\(threadID.uuidString, privacy: .public); keeping fallback/current title"
+                )
+                return
+            }
+            guard isMeaningfulGeneratedTitle(normalizedTitle, context: "generated") else {
+                Self.titleLogger.debug(
+                    "Rejected generated title for thread=\(threadID.uuidString, privacy: .public): \(normalizedTitle, privacy: .public)"
+                )
+                return
+            }
             await MainActor.run {
                 guard thread.id == threadID else { return }
                 let currentTitle = thread.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 let shouldReplace =
                     currentTitle.isEmpty ||
                     (fallback?.caseInsensitiveCompare(currentTitle) == .orderedSame) ||
-                    !isMeaningfulGeneratedTitle(currentTitle)
-                guard shouldReplace else { return }
+                    !isMeaningfulGeneratedTitle(currentTitle, context: "current")
+                guard shouldReplace else {
+                    Self.titleLogger.debug(
+                        "Preserving current title for thread=\(threadID.uuidString, privacy: .public): \(currentTitle, privacy: .public)"
+                    )
+                    return
+                }
                 thread.title = normalizedTitle
                 try? modelContext.save()
+                Self.titleLogger.info(
+                    "Saved generated title for thread=\(threadID.uuidString, privacy: .public): \(normalizedTitle, privacy: .public)"
+                )
             }
         }
     }
@@ -424,7 +477,17 @@ struct ChatView: View {
     }
 
     private func normalizeTitle(_ raw: String) -> String? {
+        let trimmedRaw = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedRaw.isEmpty else {
+            Self.titleLogger.debug("normalizeTitle: raw title is empty")
+            return nil
+        }
+
         let extracted = extractJSONTitle(from: raw) ?? raw
+        let usedJSONExtraction = extracted != raw
+        Self.titleLogger.debug(
+            "normalizeTitle: jsonExtraction=\(usedJSONExtraction, privacy: .public) rawChars=\(raw.count, privacy: .public) extractedChars=\(extracted.count, privacy: .public)"
+        )
         var cleaned = stripReasoningPreamble(from: extracted)
         cleaned = cleaned.replacingOccurrences(of: "\n", with: " ")
         cleaned = cleaned.replacingOccurrences(of: "\r", with: " ")
@@ -440,18 +503,49 @@ struct ChatView: View {
             .split { $0.isWhitespace }
             .map(String.init)
 
-        guard !words.isEmpty else { return nil }
+        guard !words.isEmpty else {
+            Self.titleLogger.debug(
+                "normalizeTitle: no words after cleaning; extractedPreview=\(previewForLog(extracted), privacy: .public)"
+            )
+            return nil
+        }
         let limited = words.prefix(8).joined(separator: " ")
+        Self.titleLogger.debug(
+            "normalizeTitle: result=\(limited, privacy: .public)"
+        )
         return limited.isEmpty ? nil : limited
     }
 
-    private func isMeaningfulGeneratedTitle(_ title: String) -> Bool {
+    private func isMeaningfulGeneratedTitle(_ title: String, context: String) -> Bool {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
+        guard !trimmed.isEmpty else {
+            Self.titleLogger.debug("Rejected \(context, privacy: .public) title: empty")
+            return false
+        }
+        guard !looksLikeReasoningArtifact(trimmed, context: context) else { return false }
 
         let lower = trimmed.lowercased()
-        let disallowed = ["chat", "new chat", "conversation", "untitled", "title"]
+        let disallowed = [
+            "chat",
+            "new chat",
+            "conversation",
+            "untitled",
+            "title",
+            "string",
+            "json",
+            "object",
+            "response",
+            "output",
+            "text",
+            "n/a",
+            "none",
+            "null",
+            "undefined"
+        ]
         if disallowed.contains(lower) {
+            Self.titleLogger.debug(
+                "Rejected \(context, privacy: .public) title: generic value=\(trimmed, privacy: .public)"
+            )
             return false
         }
 
@@ -466,6 +560,9 @@ struct ChatView: View {
             "the prompt"
         ]
         if disallowedPrefixes.contains(where: { lower.hasPrefix($0) }) {
+            Self.titleLogger.debug(
+                "Rejected \(context, privacy: .public) title: disallowed prefix value=\(trimmed, privacy: .public)"
+            )
             return false
         }
 
@@ -478,11 +575,107 @@ struct ChatView: View {
             " me for an opinion "
         ]
         if disallowedFragments.contains(where: { lower.contains($0) }) {
+            Self.titleLogger.debug(
+                "Rejected \(context, privacy: .public) title: disallowed fragment value=\(trimmed, privacy: .public)"
+            )
             return false
         }
 
         let words = trimmed.split { $0.isWhitespace }
-        return !words.isEmpty
+        if words.isEmpty {
+            Self.titleLogger.debug("Rejected \(context, privacy: .public) title: no words")
+            return false
+        }
+
+        // Reject schema placeholders such as "title string", "title here", etc.
+        let placeholderFragments = [
+            "title here",
+            "your title",
+            "example title",
+            "insert title",
+            "return json",
+            "json object",
+            "schema"
+        ]
+        if placeholderFragments.contains(where: { lower.contains($0) }) {
+            Self.titleLogger.debug(
+                "Rejected \(context, privacy: .public) title: schema placeholder value=\(trimmed, privacy: .public)"
+            )
+            return false
+        }
+
+        return true
+    }
+
+    private func looksLikeReasoningArtifact(_ text: String, context: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            Self.titleLogger.debug("Rejected \(context, privacy: .public) title: blank after trim")
+            return true
+        }
+
+        // Common leaked formatting from reasoning/tool outputs.
+        if trimmed.contains("**") || trimmed.contains("```") || trimmed.contains("`") {
+            Self.titleLogger.debug(
+                "Rejected \(context, privacy: .public) title: markdown artifact value=\(trimmed, privacy: .public)"
+            )
+            return true
+        }
+        if trimmed.hasPrefix("#") || trimmed.hasPrefix(">") {
+            Self.titleLogger.debug(
+                "Rejected \(context, privacy: .public) title: heading/blockquote artifact value=\(trimmed, privacy: .public)"
+            )
+            return true
+        }
+        if trimmed.hasSuffix(":") {
+            Self.titleLogger.debug(
+                "Rejected \(context, privacy: .public) title: trailing colon value=\(trimmed, privacy: .public)"
+            )
+            return true
+        }
+
+        // Reject ordered-list headings like "1. Analyze..."
+        if let listRegex = try? NSRegularExpression(pattern: #"^\s*\d+[\.\)]\s+"#, options: []),
+           listRegex.firstMatch(in: trimmed, options: [], range: NSRange(location: 0, length: trimmed.utf16.count)) != nil {
+            Self.titleLogger.debug(
+                "Rejected \(context, privacy: .public) title: ordered-list artifact value=\(trimmed, privacy: .public)"
+            )
+            return true
+        }
+
+        let lower = trimmed.lowercased()
+        let metaPhrases = [
+            "analyze the request",
+            "analysis:",
+            "reasoning:",
+            "the user wants",
+            "the user is asking",
+            "i should",
+            "i need to",
+            "let me ",
+            "step by step",
+            "constraints",
+            "requirements",
+            "tool call",
+            "final answer"
+        ]
+        if metaPhrases.contains(where: { lower.contains($0) }) {
+            Self.titleLogger.debug(
+                "Rejected \(context, privacy: .public) title: meta phrase value=\(trimmed, privacy: .public)"
+            )
+            return true
+        }
+
+        return false
+    }
+
+    private func previewForLog(_ text: String, maxLength: Int = 140) -> String {
+        let compact = text
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard compact.count > maxLength else { return compact }
+        return String(compact.prefix(maxLength)) + "..."
     }
 
     private func extractJSONTitle(from raw: String) -> String? {

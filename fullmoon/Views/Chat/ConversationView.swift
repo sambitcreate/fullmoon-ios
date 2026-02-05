@@ -427,7 +427,6 @@ struct ConversationView: View {
                         .padding(.vertical)
                         .id("output")
                         .onAppear {
-                            print("output appeared")
                             scrollInterrupted = false // reset interruption when a new output begins
                         }
                     }

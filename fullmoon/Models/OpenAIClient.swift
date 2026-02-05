@@ -412,13 +412,46 @@ struct OpenAIClient {
             return cleaned.isEmpty ? nil : cleaned
         }
 
+        func isPlaceholderTitle(_ text: String) -> Bool {
+            let lower = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let disallowed = [
+                "string",
+                "title",
+                "json",
+                "object",
+                "response",
+                "output",
+                "text",
+                "n/a",
+                "none",
+                "null",
+                "undefined"
+            ]
+            if disallowed.contains(lower) {
+                return true
+            }
+
+            let placeholderFragments = [
+                "title here",
+                "your title",
+                "example title",
+                "insert title",
+                "json object",
+                "schema"
+            ]
+            return placeholderFragments.contains(where: { lower.contains($0) })
+        }
+
         func parseJSONObjectTitle(from text: String) -> String? {
             guard let data = text.data(using: .utf8),
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let title = object["title"] as? String else {
                 return nil
             }
-            return cleanedTitle(title)
+            guard let cleaned = cleanedTitle(title), !isPlaceholderTitle(cleaned) else {
+                return nil
+            }
+            return cleaned
         }
 
         func parseEmbeddedJSONTitle(from text: String) -> String? {
@@ -447,9 +480,15 @@ struct OpenAIClient {
             let escaped = String(text[titleRange])
             guard let wrapped = "\"\(escaped)\"".data(using: .utf8),
                   let decoded = try? JSONDecoder().decode(String.self, from: wrapped) else {
-                return cleanedTitle(escaped)
+                guard let cleaned = cleanedTitle(escaped), !isPlaceholderTitle(cleaned) else {
+                    return nil
+                }
+                return cleaned
             }
-            return cleanedTitle(decoded)
+            guard let cleaned = cleanedTitle(decoded), !isPlaceholderTitle(cleaned) else {
+                return nil
+            }
+            return cleaned
         }
 
         func parseTitleFromText(_ text: String) -> String? {
@@ -481,7 +520,10 @@ struct OpenAIClient {
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
             if let firstLine = lines.first, !firstLine.contains("{"), !firstLine.contains("}") {
-                return cleanedTitle(firstLine)
+                guard let cleaned = cleanedTitle(firstLine), !isPlaceholderTitle(cleaned) else {
+                    return nil
+                }
+                return cleaned
             }
 
             return nil

@@ -10,6 +10,7 @@ import MLX
 import MLXLLM
 import MLXLMCommon
 import MLXRandom
+import OSLog
 import SwiftUI
 
 enum LLMEvaluatorError: Error {
@@ -39,6 +40,11 @@ struct AgentActivity: Identifiable, Equatable {
 @Observable
 @MainActor
 class LLMEvaluator {
+    private static let titleLogger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "fullmoon",
+        category: "TitleGeneration"
+    )
+
     var running = false
     var cancelled = false
     var output = ""
@@ -380,11 +386,23 @@ class LLMEvaluator {
 
     func generateTitle(modelName: String, thread: Thread, systemPrompt: String) async -> String {
         let fallback = lastUserMessageText(from: thread).flatMap(fallbackTitle(from:))
+        Self.titleLogger.info(
+            "Local title generation started model=\(modelName, privacy: .public) thread=\(thread.id.uuidString, privacy: .public) messageCount=\(thread.sortedMessages.count, privacy: .public)"
+        )
+        if let fallback, !fallback.isEmpty {
+            Self.titleLogger.debug("Local fallback title candidate: \(fallback, privacy: .public)")
+        } else {
+            Self.titleLogger.debug("No local fallback title candidate available")
+        }
+
         do {
             let modelContainer = try await load(modelName: modelName)
             let promptHistory = await modelContainer.configuration.getPromptHistory(
                 thread: thread,
                 systemPrompt: systemPrompt
+            )
+            Self.titleLogger.debug(
+                "Local title prompt history prepared entries=\(promptHistory.count, privacy: .public) model=\(modelName, privacy: .public)"
             )
 
             MLXRandom.seed(UInt64(Date.timeIntervalSinceReferenceDate * 1000))
@@ -408,10 +426,25 @@ class LLMEvaluator {
 
             let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty {
+                Self.titleLogger.notice(
+                    "Local title model output empty model=\(modelName, privacy: .public); using fallback=\(fallback ?? "", privacy: .public)"
+                )
                 return fallback ?? ""
             }
+            guard isAcceptableTitleCandidate(trimmed) else {
+                Self.titleLogger.notice(
+                    "Local title candidate rejected model=\(modelName, privacy: .public) candidate=\(self.previewForLog(trimmed), privacy: .public); using fallback=\(fallback ?? "", privacy: .public)"
+                )
+                return fallback ?? ""
+            }
+            Self.titleLogger.info(
+                "Local title generated model=\(modelName, privacy: .public) chars=\(trimmed.count, privacy: .public) preview=\(self.previewForLog(trimmed), privacy: .public)"
+            )
             return result
         } catch {
+            Self.titleLogger.error(
+                "Local title generation failed model=\(modelName, privacy: .public) error=\(error.localizedDescription, privacy: .public); using fallback=\(fallback ?? "", privacy: .public)"
+            )
             return fallback ?? ""
         }
     }
@@ -424,8 +457,20 @@ class LLMEvaluator {
         apiKey: String
     ) async -> String {
         let fallback = lastUserMessageText(from: thread).flatMap(fallbackTitle(from:))
+        let trimmedBaseURL = apiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        Self.titleLogger.info(
+            "Cloud title generation started model=\(modelName, privacy: .public) thread=\(thread.id.uuidString, privacy: .public) baseURL=\(trimmedBaseURL, privacy: .public) messageCount=\(thread.sortedMessages.count, privacy: .public)"
+        )
+        if let fallback, !fallback.isEmpty {
+            Self.titleLogger.debug("Cloud fallback title candidate: \(fallback, privacy: .public)")
+        } else {
+            Self.titleLogger.debug("No cloud fallback title candidate available")
+        }
 
         guard let baseURL = OpenAIClient.normalizedBaseURL(from: apiBaseURL) else {
+            Self.titleLogger.error(
+                "Cloud title generation aborted model=\(modelName, privacy: .public); invalid base URL=\(trimmedBaseURL, privacy: .public); using fallback=\(fallback ?? "", privacy: .public)"
+            )
             return fallback ?? ""
         }
 
@@ -442,20 +487,46 @@ class LLMEvaluator {
 
         let maxAttempts = 2
         for attempt in 1...maxAttempts {
+            Self.titleLogger.debug(
+                "Cloud title attempt=\(attempt, privacy: .public)/\(maxAttempts, privacy: .public) model=\(modelName, privacy: .public)"
+            )
             do {
                 var request = try OpenAIClient.makeChatRequest(baseURL: baseURL, apiKey: apiKey, body: requestBody)
                 request.setValue("application/json", forHTTPHeaderField: "Accept")
                 request.setValue("en-US,en", forHTTPHeaderField: "Accept-Language")
                 request.timeoutInterval = 20
 
-                let (data, _) = try await requestChatResponseData(request: request)
-                let responseText = OpenAIClient.extractJSONTitle(from: data) ?? OpenAIClient.extractChatText(from: data)
+                let (data, httpResponse) = try await requestChatResponseData(request: request)
+                let jsonTitle = OpenAIClient.extractJSONTitle(from: data)
+                let chatText = OpenAIClient.extractChatText(from: data)
+                let responseText = jsonTitle ?? chatText
                 let trimmed = responseText.trimmingCharacters(in: .whitespacesAndNewlines)
+                let jsonTitlePreview = jsonTitle.map { self.previewForLog($0) } ?? ""
+                Self.titleLogger.debug(
+                    "Cloud title response attempt=\(attempt, privacy: .public) status=\(httpResponse.statusCode, privacy: .public) bytes=\(data.count, privacy: .public) jsonTitleFound=\(jsonTitle != nil, privacy: .public) jsonTitlePreview=\(jsonTitlePreview, privacy: .public) textChars=\(chatText.count, privacy: .public)"
+                )
                 if !trimmed.isEmpty {
-                    print("Title generation received \(trimmed.count) chars for model: \(modelName)")
+                    guard isAcceptableTitleCandidate(trimmed) else {
+                        Self.titleLogger.notice(
+                            "Cloud title candidate rejected model=\(modelName, privacy: .public) attempt=\(attempt, privacy: .public) candidate=\(self.previewForLog(trimmed), privacy: .public)"
+                        )
+                        if attempt < maxAttempts {
+                            try? await Task.sleep(nanoseconds: 250_000_000)
+                        }
+                        continue
+                    }
+                    Self.titleLogger.info(
+                        "Cloud title generated model=\(modelName, privacy: .public) attempt=\(attempt, privacy: .public) chars=\(trimmed.count, privacy: .public) preview=\(self.previewForLog(trimmed), privacy: .public)"
+                    )
                     return responseText
                 }
+                Self.titleLogger.notice(
+                    "Cloud title response empty after parsing model=\(modelName, privacy: .public) attempt=\(attempt, privacy: .public)"
+                )
             } catch {
+                Self.titleLogger.error(
+                    "Cloud title attempt failed model=\(modelName, privacy: .public) attempt=\(attempt, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+                )
                 if attempt == maxAttempts {
                     break
                 }
@@ -463,6 +534,9 @@ class LLMEvaluator {
             }
         }
 
+        Self.titleLogger.notice(
+            "Cloud title generation exhausted attempts model=\(modelName, privacy: .public); using fallback=\(fallback ?? "", privacy: .public)"
+        )
         return fallback ?? ""
     }
 
@@ -725,6 +799,82 @@ class LLMEvaluator {
             .map(String.init)
         let limited = tokens.prefix(8).joined(separator: " ")
         return limited.isEmpty ? nil : limited
+    }
+
+    private func previewForLog(_ text: String, maxLength: Int = 140) -> String {
+        let compact = text
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard compact.count > maxLength else { return compact }
+        return String(compact.prefix(maxLength)) + "..."
+    }
+
+    private func isAcceptableTitleCandidate(_ candidate: String) -> Bool {
+        let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+
+        let lower = trimmed.lowercased()
+
+        let exactDisallowed: Set<String> = [
+            "chat",
+            "new chat",
+            "conversation",
+            "untitled",
+            "title",
+            "string",
+            "json",
+            "object",
+            "response",
+            "output",
+            "text",
+            "n/a",
+            "none",
+            "null",
+            "undefined"
+        ]
+        if exactDisallowed.contains(lower) {
+            return false
+        }
+
+        if trimmed.contains("**") || trimmed.contains("```") || trimmed.contains("`") {
+            return false
+        }
+        if trimmed.hasPrefix("#") || trimmed.hasPrefix(">") || trimmed.hasSuffix(":") {
+            return false
+        }
+
+        if let listRegex = try? NSRegularExpression(pattern: #"^\s*\d+[\.\)]\s+"#, options: []),
+           listRegex.firstMatch(in: trimmed, options: [], range: NSRange(location: 0, length: trimmed.utf16.count)) != nil {
+            return false
+        }
+
+        let badFragments = [
+            "analyze the request",
+            "analysis:",
+            "reasoning:",
+            "the user wants",
+            "the user is asking",
+            "i should",
+            "i need to",
+            "let me ",
+            "step by step",
+            "constraints",
+            "requirements",
+            "tool call",
+            "final answer",
+            "title here",
+            "your title",
+            "example title",
+            "insert title",
+            "json object",
+            "schema"
+        ]
+        if badFragments.contains(where: { lower.contains($0) }) {
+            return false
+        }
+
+        return !trimmed.split(whereSeparator: { $0.isWhitespace }).isEmpty
     }
 
     private func requestChatResponseData(request: URLRequest) async throws -> (Data, HTTPURLResponse) {
