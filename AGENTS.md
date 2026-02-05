@@ -48,14 +48,17 @@ fullmoon-ios/
 ├── fullmoon/                          # Main app directory
 │   ├── Models/                        # Core model classes
 │   │   ├── Data.swift                # AppManager, Message, Thread, enums
+│   │   ├── ExaClient.swift            # Exa search client + request/response models
 │   │   ├── LLMEvaluator.swift        # LLM generation and evaluation logic
 │   │   ├── DeviceStat.swift          # GPU/memory usage tracking
 │   │   ├── OpenAIClient.swift         # OpenAI-compatible API client (models + chat)
 │   │   ├── Models.swift              # Model configurations and registry
+│   │   ├── ThinkingModePrompt.swift   # System prompt bundle for thinking mode
 │   │   └── RequestLLMIntent.swift     # App Intents integration
 │   ├── Views/                         # SwiftUI views
 │   │   ├── Chat/                     # Chat interface
 │   │   ├── Settings/                 # Settings screens
+│   │   │   └── WebSearchSettingsView.swift # Web search toggle + EXA key
 │   │   └── Onboarding/               # First-run experience
 │   ├── Assets.xcassets/              # Images, colors, etc.
 │   └── fullmoonApp.swift            # App entry point
@@ -99,10 +102,24 @@ Dependencies are managed through Xcode's SPM integration (no Package.swift file 
   - `POST {baseURL}/chat/completions` with `stream: true`
 - **Model list**: Users can fetch models from the endpoint or add custom model IDs manually.
 
+### Web Search (Exa)
+
+- **Settings**: Web Search is toggled in Settings and requires an EXA API key.
+- **Tools**: Cloud chats expose `web_search` and `exa_search` tool aliases; responses are built from Exa highlights.
+- **Badge**: Assistant messages show a blue "web search" badge when tools were used.
+- **Note**: Web search only runs for cloud models; local models ignore the tool loop.
+
+### Thinking Mode
+
+- **Toggle**: Added in the model picker (Models settings).
+- **Behavior**: Appends `ThinkingModePrompt.text` to the system prompt for cloud models only.
+- **System prompt**: `AppManager.effectiveSystemPrompt` controls the combined prompt.
+
 ### SwiftData Models
 
 - `Message` - Chat messages with role (user/assistant/system)
 - `Thread` - Chat conversations containing multiple messages
+- `Message.usedWebSearch` is optional to support migration from older stores.
 - Both use `@Model` macro and `@Attribute(.unique)` for IDs
 
 ### API Deprecations (Fixed)
@@ -161,6 +178,7 @@ Use `appManager.userInterfaceIdiom` for UI adaptation:
 - Generation stops unexpectedly - Check `LLMEvaluator.cancelled` state and memory limits
 - App crashes on simulator - MLX doesn't work in simulator, use physical device
 - Cloud model fetch 404s - Verify your base URL path (no automatic `/v1`). Include the correct version path in settings if required by the provider.
+- SwiftData migration errors after schema changes - Delete app data on device/simulator or make new fields optional with safe defaults.
 
 ## Code Style
 

@@ -205,7 +205,7 @@ class LLMEvaluator {
 
             let trimmedExaKey = exaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
             let webSearchAvailable = webSearchEnabled && !trimmedExaKey.isEmpty
-            let tools = webSearchAvailable ? [webSearchTool] : nil
+            let tools = webSearchAvailable ? [webSearchTool, exaSearchTool] : nil
             let toolChoice = webSearchAvailable ? "auto" : nil
 
             var messages = makeOpenAIChatMessages(thread: thread, systemPrompt: systemPrompt)
@@ -248,7 +248,9 @@ class LLMEvaluator {
                         toolIterations += 1
                         continue
                     } else if outputText.isEmpty {
-                        outputText = "Web search is not available. Enable it in settings and add an EXA API key."
+                        outputText = webSearchAvailable
+                            ? "Web search tool budget reached for this message."
+                            : "Web search is disabled or missing an EXA API key."
                     }
                 }
 
@@ -328,6 +330,16 @@ class LLMEvaluator {
         )
     }
 
+    private var exaSearchTool: OpenAIClient.Tool {
+        OpenAIClient.Tool(
+            function: .init(
+                name: "exa_search",
+                description: "Search the web with Exa. Alias of web_search.",
+                parameters: webSearchTool.function.parameters
+            )
+        )
+    }
+
     private func streamChatResponse(request: URLRequest) async throws -> CloudStreamResult {
         let (bytes, response) = try await URLSession.shared.bytes(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -390,7 +402,7 @@ class LLMEvaluator {
 
         for call in toolCalls {
             let toolCallId = call.id ?? UUID().uuidString
-            if call.function.name == "web_search" {
+            if call.function.name == "web_search" || call.function.name == "exa_search" {
                 guard let data = call.function.arguments.data(using: .utf8) else {
                     let payload = ToolErrorPayload(error: "invalid tool arguments")
                     messages.append(.init(role: "tool", content: encodePayload(payload), toolCallId: toolCallId))

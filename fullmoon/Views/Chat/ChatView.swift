@@ -290,7 +290,7 @@ struct ChatView: View {
                             generatingThreadID = nil
                             return
                         }
-                        let output = await llm.generate(modelName: modelName, thread: currentThread, systemPrompt: appManager.systemPrompt)
+                        let output = await llm.generate(modelName: modelName, thread: currentThread, systemPrompt: appManager.effectiveSystemPrompt)
                         sendMessage(Message(role: .assistant, content: output, thread: currentThread, generatingTime: llm.thinkingTime))
                         generatingThreadID = nil
                     case .cloud:
@@ -302,7 +302,7 @@ struct ChatView: View {
                         let output = await llm.generateCloud(
                             modelName: modelName,
                             thread: currentThread,
-                            systemPrompt: appManager.systemPrompt,
+                            systemPrompt: appManager.effectiveSystemPrompt,
                             apiBaseURL: appManager.cloudAPIBaseURL,
                             apiKey: appManager.cloudAPIKey,
                             webSearchEnabled: appManager.webSearchEnabled,

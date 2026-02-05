@@ -100,7 +100,7 @@ struct MessageView: View {
             if message.role == .assistant {
                 let (thinking, afterThink) = processThinkingContent(message.content)
                 VStack(alignment: .leading, spacing: 16) {
-                    if message.usedWebSearch {
+                    if message.usedWebSearch == true {
                         webSearchBadge
                     }
                     if let thinking {

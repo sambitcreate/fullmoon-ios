@@ -25,6 +25,7 @@ class AppManager: ObservableObject {
     @AppStorage("cloudAPIKey") var cloudAPIKey: String = ""
     @AppStorage("webSearchEnabled") var webSearchEnabled = false
     @AppStorage("exaAPIKey") var exaAPIKey: String = ""
+    @AppStorage("thinkingModeEnabled") var thinkingModeEnabled = false
     @AppStorage("currentModelSource") private var currentModelSourceRaw = ModelSource.local.rawValue
     @AppStorage("shouldPlayHaptics") var shouldPlayHaptics = true
     @AppStorage("numberOfVisits") var numberOfVisits = 0
@@ -87,6 +88,19 @@ class AppManager: ObservableObject {
         case .cloud:
             return currentCloudModelName ?? ""
         }
+    }
+
+    var effectiveSystemPrompt: String {
+        guard thinkingModeEnabled, currentModelSource == .cloud else {
+            return systemPrompt
+        }
+
+        let trimmedBase = systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedBase.isEmpty {
+            return ThinkingModePrompt.text
+        }
+
+        return trimmedBase + "\n\n" + ThinkingModePrompt.text
     }
     
     init() {

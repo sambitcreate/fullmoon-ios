@@ -75,6 +75,14 @@ struct ModelsSettingsView: View {
                 }
             }
 
+            Section(header: Text("thinking mode")) {
+                Toggle("thinking mode", isOn: $appManager.thinkingModeEnabled)
+                    .tint(.blue)
+                Text("adds the agentic Exa research harness prompt to the system prompt for cloud models")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section(header: Text("add custom model")) {
                 HStack(spacing: 12) {
                     TextField("model id", text: $newCloudModelName)
