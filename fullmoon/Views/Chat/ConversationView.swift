@@ -61,6 +61,24 @@ struct FadingMarkdownBlock: View {
     }
 }
 
+struct FadeInMessageView: View {
+    let message: Message
+    @State private var opacity: Double = 0
+    @State private var offset: CGFloat = 5
+    
+    var body: some View {
+        MessageView(message: message)
+            .opacity(opacity)
+            .offset(y: offset)
+            .onAppear {
+                withAnimation(.easeOut(duration: 0.3)) {
+                    opacity = 1.0
+                    offset = 0
+                }
+            }
+    }
+}
+
 typealias DelayedSequentialFadeInMessageView = SequentialFadeInMessageView
 
 struct SequentialFadeInMessageView: View {
@@ -362,10 +380,25 @@ struct ConversationView: View {
                                     .padding(.horizontal)
                                 }
                             } else {
-                                // Show normal streaming output
+                                // Show normal streaming output with fade-in
                                 if !llm.output.isEmpty {
-                                    MessageView(message: Message(role: .assistant, content: llm.output + " 🌕"))
-                                        .padding(.horizontal)
+                                    FadeInMessageView(
+                                        message: Message(role: .assistant, content: llm.output + " 🌕")
+                                    )
+                                    .padding(.horizontal)
+                                } else {
+                                    // Show thinking indicator while waiting for initial response
+                                    HStack(spacing: 8) {
+                                        Circle()
+                                            .fill(.secondary)
+                                            .frame(width: 6, height: 6)
+                                        Text("thinking...")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                            .italic()
+                                    }
+                                    .padding(.horizontal)
+                                    .opacity(0.7)
                                 }
                             }
                             
@@ -415,7 +448,12 @@ struct ConversationView: View {
             .onChange(of: llm.isFinalizingAnswer) { wasFinalizing, isFinalizingNow in
                 // When final answer starts, scroll to top of output so user sees first block
                 if !wasFinalizing && isFinalizingNow {
-                    scrollView.scrollTo("output", anchor: .top)
+                    // Small delay to ensure content is rendered
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            scrollView.scrollTo("output", anchor: .top)
+                        }
+                    }
                 }
             }
             .onChange(of: llm.running) { wasRunning, isRunning in
@@ -428,7 +466,7 @@ struct ConversationView: View {
                 }
             }
         }
-        .defaultScrollAnchor(.bottom)
+        .defaultScrollAnchor(llm.isFinalizingAnswer ? nil : .bottom)
         #if os(iOS)
             .scrollDismissesKeyboard(.interactively)
         #endif

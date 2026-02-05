@@ -242,7 +242,16 @@ class LLMEvaluator {
 
             let trimmedExaKey = exaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
             let webSearchAvailable = webSearchEnabled && !trimmedExaKey.isEmpty
-            let tools = webSearchAvailable ? [webSearchTool, exaSearchTool, finalizeAnswerTool] : nil
+            // Only provide finalize_answer tool in thinking mode (agentic workflow)
+            // Without thinking mode, model should return text naturally after searches
+            let tools: [OpenAIClient.Tool]? = {
+                guard webSearchAvailable else { return nil }
+                if thinkingModeEnabled {
+                    return [webSearchTool, exaSearchTool, finalizeAnswerTool]
+                } else {
+                    return [webSearchTool, exaSearchTool]
+                }
+            }()
             let toolChoice = webSearchAvailable ? "auto" : nil
 
             var messages = makeOpenAIChatMessages(thread: thread, systemPrompt: systemPrompt)
@@ -323,11 +332,32 @@ class LLMEvaluator {
                         }
                         
                         continue
-                    } else if currentIterationText.isEmpty {
-                        currentIterationText = webSearchAvailable
-                            ? "Web search tool budget reached for this message."
-                            : "Web search is disabled or missing an EXA API key."
-                        output = currentIterationText
+                    } else {
+                        // Hit budget limit - make one final request WITHOUT tools to get answer
+                        messages.append(.init(role: Role.assistant.rawValue, content: nil, toolCalls: toolCalls))
+                        messages.append(.init(role: Role.system.rawValue, content: "Please provide your final answer based on the search results you've gathered. Do not use any more tools."))
+                        
+                        let finalRequestBody = OpenAIClient.ChatRequest(
+                            model: modelName,
+                            messages: messages,
+                            temperature: Double(generateParameters.temperature),
+                            maxTokens: generateParameters.maxTokens,
+                            stream: true,
+                            tools: nil,  // No tools for final response
+                            toolChoice: nil
+                        )
+                        let finalRequest = try OpenAIClient.makeChatRequest(baseURL: baseURL, apiKey: apiKey, body: finalRequestBody)
+                        let finalResult = try await streamChatResponse(request: finalRequest)
+                        
+                        currentIterationText = finalResult.text
+                        if !currentIterationText.isEmpty {
+                            isFinalizingAnswer = true
+                            if toolIterations > 0 && !output.contains(currentIterationText) {
+                                output += "\n\n" + currentIterationText
+                            } else if toolIterations == 0 {
+                                output = currentIterationText
+                            }
+                        }
                     }
                 }
 
