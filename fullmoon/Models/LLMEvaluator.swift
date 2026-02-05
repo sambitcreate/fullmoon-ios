@@ -73,7 +73,7 @@ class LLMEvaluator {
         switch loadState {
         case .idle:
             // limit the buffer cache
-            MLX.GPU.set(cacheLimit: 20 * 1024 * 1024)
+            Memory.cacheLimit = 20 * 1024 * 1024
 
             let modelContainer = try await LLMModelFactory.shared.loadContainer(configuration: model) {
                 [modelConfiguration] progress in
@@ -84,7 +84,7 @@ class LLMEvaluator {
                 }
             }
             modelInfo =
-                "Loaded \(modelConfiguration.id).  Weights: \(MLX.GPU.activeMemory / 1024 / 1024)M"
+                "Loaded \(modelConfiguration.id).  Weights: \(Memory.activeMemory / 1024 / 1024)M"
             loadState = .loaded(modelContainer)
             return modelContainer
 
@@ -121,16 +121,19 @@ class LLMEvaluator {
 
             let result = try await modelContainer.perform { context in
                 let input = try await context.processor.prepare(input: .init(messages: promptHistory))
-                return try MLXLMCommon.generate(
-                    input: input, parameters: generateParameters, context: context
-                ) { tokens in
+                let stream = try MLXLMCommon.generate(
+                    input: input, cache: nil, parameters: generateParameters, context: context
+                )
+
+                var tokens: [Int] = []
+                for await token in stream {
+                    tokens.append(token)
 
                     var cancelled = false
                     Task { @MainActor in
                         cancelled = self.cancelled
                     }
 
-                    // update the output -- this will make the view show the text as it generates
                     if tokens.count % displayEveryNTokens == 0 {
                         let text = context.tokenizer.decode(tokens: tokens)
                         Task { @MainActor in
@@ -139,11 +142,14 @@ class LLMEvaluator {
                     }
 
                     if tokens.count >= maxTokens || cancelled {
-                        return .stop
-                    } else {
-                        return .more
+                        break
                     }
                 }
+
+                return GenerateResult(
+                    output: context.tokenizer.decode(tokens: tokens),
+                    tokensPerSecond: Double(tokens.count) / (self.elapsedTime ?? 1.0)
+                )
             }
 
             // update the text if needed, e.g. we haven't displayed because of displayEveryNTokens

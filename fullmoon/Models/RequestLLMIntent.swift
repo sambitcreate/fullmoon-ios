@@ -42,33 +42,33 @@ struct RequestLLMIntent: AppIntent {
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
         let llm = LLMEvaluator()
         let appManager = AppManager()
-        
+
         if prompt.isEmpty {
             if let output = thread.messages.last?.content {
-                return .result(value: output, dialog: "continue chatting in the app") // if prompt is empty and this is not the first message, return the result
+                return .result(value: output, dialog: "continue chatting in the app")
             } else {
-                throw $prompt.requestValue("chat") // re-prompt
+                throw $prompt.needsValueError("chat")
             }
         }
 
         if let modelName = appManager.currentModelName {
             _ = try? await llm.load(modelName: modelName)
-            
+
             let message = Message(role: .user, content: prompt, thread: thread)
             thread.messages.append(message)
             var output = await llm.generate(modelName: modelName, thread: thread, systemPrompt: appManager.systemPrompt + systemPrompt)
-            
+
             let maxCharacters = maxCharacters ?? .max
-            
+
             if output.count > maxCharacters {
                 output = String(output.prefix(maxCharacters)).trimmingCharacters(in: .whitespaces) + "..."
             }
-            
+
             let responseMessage = Message(role: .assistant, content: output, thread: thread)
             thread.messages.append(responseMessage)
 
             if continuous {
-                throw $prompt.requestValue("\(output)") // re-prompt infinitely until user cancels
+                throw $prompt.needsValueError("\(output)")
             }
             
             if continuous {
@@ -91,7 +91,7 @@ struct NewChatShortcut: AppShortcutsProvider {
         AppShortcut(
             intent: RequestLLMIntent(),
             phrases: [
-                "Start a new chat",
+                "Start a new \(.applicationName) chat",
                 "Start a \(.applicationName) chat",
                 "Chat with \(.applicationName)",
                 "Ask \(.applicationName) a question"

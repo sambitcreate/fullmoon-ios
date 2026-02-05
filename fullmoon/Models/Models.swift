@@ -24,7 +24,7 @@ public extension ModelConfiguration {
     }
 }
 
-extension ModelConfiguration: @retroactive Equatable {
+extension ModelConfiguration {
     public static func == (lhs: MLXLMCommon.ModelConfiguration, rhs: MLXLMCommon.ModelConfiguration) -> Bool {
         return lhs.name == rhs.name
     }

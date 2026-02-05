@@ -13,9 +13,9 @@ import MLX
 final class DeviceStat: @unchecked Sendable {
 
     @MainActor
-    var gpuUsage = GPU.snapshot()
+    var gpuUsage = Memory.snapshot()
 
-    private let initialGPUSnapshot = GPU.snapshot()
+    private let initialGPUSnapshot = Memory.snapshot()
     private var timer: Timer?
 
     init() {
@@ -29,7 +29,7 @@ final class DeviceStat: @unchecked Sendable {
     }
 
     private func updateGPUUsages() {
-        let gpuSnapshotDelta = initialGPUSnapshot.delta(GPU.snapshot())
+        let gpuSnapshotDelta = initialGPUSnapshot.delta(Memory.snapshot())
         DispatchQueue.main.async { [weak self] in
             self?.gpuUsage = gpuSnapshotDelta
         }

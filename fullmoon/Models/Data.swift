@@ -159,17 +159,17 @@ class Message {
 }
 
 @Model
-final class Thread: Sendable {
+final class Thread {
     @Attribute(.unique) var id: UUID
     var title: String?
     var timestamp: Date
-    
+
     @Relationship var messages: [Message] = []
-    
+
     var sortedMessages: [Message] {
         return messages.sorted { $0.timestamp < $1.timestamp }
     }
-    
+
     init() {
         self.id = UUID()
         self.timestamp = Date()
