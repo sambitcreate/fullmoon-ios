@@ -169,12 +169,20 @@ struct ChatView: View {
 
     var chatTitle: String {
         if let currentThread = currentThread {
+            let trimmedTitle = currentThread.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !trimmedTitle.isEmpty {
+                return trimmedTitle
+            }
             if let firstMessage = currentThread.sortedMessages.first {
                 return firstMessage.content
             }
         }
 
         return "chat"
+    }
+
+    private var titleSystemPrompt: String {
+        "Create a short, one-line chat title of 6 to 8 words. Reply with only the title."
     }
 
     var body: some View {
@@ -286,6 +294,7 @@ struct ChatView: View {
                     prompt = ""
                     appManager.playHaptic()
                     sendMessage(Message(role: .user, content: message, thread: currentThread))
+                    startTitleGenerationIfNeeded(for: currentThread)
                     isPromptFocused = true
                     switch appManager.currentModelSource {
                     case .local:
@@ -331,6 +340,57 @@ struct ChatView: View {
         appManager.playHaptic()
         modelContext.insert(message)
         try? modelContext.save()
+    }
+
+    private func startTitleGenerationIfNeeded(for thread: Thread) {
+        let existingTitle = thread.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard existingTitle.isEmpty else { return }
+
+        let threadID = thread.id
+        Task {
+            let rawTitle: String
+            switch appManager.currentModelSource {
+            case .local:
+                guard let modelName = appManager.currentModelName else { return }
+                rawTitle = await llm.generateTitle(modelName: modelName, thread: thread, systemPrompt: titleSystemPrompt)
+            case .cloud:
+                guard let modelName = appManager.currentCloudModelName else { return }
+                rawTitle = await llm.generateCloudTitle(
+                    modelName: modelName,
+                    thread: thread,
+                    systemPrompt: titleSystemPrompt,
+                    apiBaseURL: appManager.cloudAPIBaseURL,
+                    apiKey: appManager.cloudAPIKey
+                )
+            }
+
+            guard let normalizedTitle = normalizeTitle(rawTitle) else { return }
+            await MainActor.run {
+                guard thread.id == threadID else { return }
+                thread.title = normalizedTitle
+                try? modelContext.save()
+            }
+        }
+    }
+
+    private func normalizeTitle(_ raw: String) -> String? {
+        var cleaned = raw.replacingOccurrences(of: "\n", with: " ")
+        cleaned = cleaned.replacingOccurrences(of: "\r", with: " ")
+        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        cleaned = cleaned.trimmingCharacters(in: CharacterSet(charactersIn: "\"'“”‘’"))
+
+        let lowercased = cleaned.lowercased()
+        if lowercased.hasPrefix("title:") {
+            cleaned = String(cleaned.dropFirst("title:".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        let words = cleaned
+            .split { $0.isWhitespace }
+            .map(String.init)
+
+        guard !words.isEmpty else { return nil }
+        let limited = words.prefix(8).joined(separator: " ")
+        return limited.isEmpty ? nil : limited
     }
 
     #if os(macOS)

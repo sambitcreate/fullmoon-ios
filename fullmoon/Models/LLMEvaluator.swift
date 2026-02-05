@@ -74,6 +74,7 @@ class LLMEvaluator {
 
     /// parameters controlling the output
     let generateParameters = GenerateParameters(maxTokens: 4096, temperature: 0.5)
+    private let titleGenerateParameters = GenerateParameters(maxTokens: 32, temperature: 0.2)
 
     /// update the display every N tokens -- 4 looks like it updates continuously
     /// and is low overhead.  observed ~15% reduction in tokens/s when updating
@@ -377,6 +378,68 @@ class LLMEvaluator {
         return output
     }
 
+    func generateTitle(modelName: String, thread: Thread, systemPrompt: String) async -> String {
+        do {
+            let modelContainer = try await load(modelName: modelName)
+            let promptHistory = await modelContainer.configuration.getPromptHistory(
+                thread: thread,
+                systemPrompt: systemPrompt
+            )
+
+            MLXRandom.seed(UInt64(Date.timeIntervalSinceReferenceDate * 1000))
+
+            let result = try await modelContainer.perform { (context: ModelContext) async throws -> String in
+                let input = try await context.processor.prepare(input: .init(messages: promptHistory))
+                let stream = try MLXLMCommon.generate(
+                    input: input, cache: nil, parameters: titleGenerateParameters, context: context
+                )
+                var outputText = ""
+                for await generation in stream {
+                    if let chunk = generation.chunk {
+                        outputText += chunk
+                    }
+                    if Task.isCancelled {
+                        break
+                    }
+                }
+                return outputText
+            }
+
+            return result
+        } catch {
+            return ""
+        }
+    }
+
+    func generateCloudTitle(
+        modelName: String,
+        thread: Thread,
+        systemPrompt: String,
+        apiBaseURL: String,
+        apiKey: String
+    ) async -> String {
+        do {
+            guard let baseURL = OpenAIClient.normalizedBaseURL(from: apiBaseURL) else {
+                return ""
+            }
+
+            let messages = makeOpenAIChatMessages(thread: thread, systemPrompt: systemPrompt)
+            let requestBody = OpenAIClient.ChatRequest(
+                model: modelName,
+                messages: messages,
+                temperature: Double(titleGenerateParameters.temperature),
+                maxTokens: titleGenerateParameters.maxTokens,
+                stream: true,
+                tools: nil,
+                toolChoice: nil
+            )
+            let request = try OpenAIClient.makeChatRequest(baseURL: baseURL, apiKey: apiKey, body: requestBody)
+            return try await streamChatResponseText(request: request)
+        } catch {
+            return ""
+        }
+    }
+
     private struct WebSearchToolArguments: Decodable {
         let query: String
         let numResults: Int?
@@ -553,6 +616,53 @@ class LLMEvaluator {
             rawResponse: rawResponse,
             toolCalls: toolAccumulator.buildToolCalls()
         )
+    }
+
+    private func streamChatResponseText(request: URLRequest) async throws -> String {
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw OpenAIClientError.invalidResponse
+        }
+
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            var body = ""
+            for try await line in bytes.lines {
+                body += line
+            }
+            throw OpenAIClientError.serverError(status: httpResponse.statusCode, body: body)
+        }
+
+        var outputText = ""
+        var rawResponse = ""
+
+        streamLoop: for try await line in bytes.lines {
+            if Task.isCancelled {
+                break streamLoop
+            }
+
+            let events = try OpenAIClient.parseStreamLine(line)
+            if events.isEmpty {
+                let trimmed = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    rawResponse += trimmed
+                }
+                continue
+            }
+
+            for event in events {
+                if case let .delta(text) = event {
+                    outputText += text
+                }
+            }
+        }
+
+        if outputText.isEmpty, !rawResponse.isEmpty, let data = rawResponse.data(using: .utf8) {
+            if let fallback = OpenAIClient.extractChatCompletionContent(from: data) {
+                outputText = fallback
+            }
+        }
+
+        return outputText
     }
 
     private struct ToolCallResult {

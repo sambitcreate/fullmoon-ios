@@ -31,7 +31,11 @@ struct ChatsListView: View {
                     ForEach(filteredThreads, id: \.id) { thread in
                         VStack(alignment: .leading) {
                             ZStack {
-                                if let firstMessage = thread.sortedMessages.first {
+                                let trimmedTitle = thread.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                                if !trimmedTitle.isEmpty {
+                                    Text(trimmedTitle)
+                                        .lineLimit(1)
+                                } else if let firstMessage = thread.sortedMessages.first {
                                     Text(firstMessage.content)
                                         .lineLimit(1)
                                 } else {
