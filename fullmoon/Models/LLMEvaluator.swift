@@ -50,6 +50,7 @@ class LLMEvaluator {
     var isThinking: Bool = false
     var lastUsedWebSearch: Bool = false
     var agentActivities: [AgentActivity] = []
+    var isFinalizingAnswer: Bool = false
 
     var elapsedTime: TimeInterval? {
         if let startTime {
@@ -224,11 +225,13 @@ class LLMEvaluator {
         isThinking = false
         thinkingTime = nil
         lastUsedWebSearch = false
+        isFinalizingAnswer = false
         clearActivities()
 
         defer {
             running = false
             cloudRequestTask = nil
+            isFinalizingAnswer = false
         }
 
         do {
@@ -299,6 +302,7 @@ class LLMEvaluator {
                         // Check if finalize_answer was called
                         if let finalAnswer = toolResult.finalAnswer {
                             // Model signaled completion with finalize_answer
+                            isFinalizingAnswer = true
                             if !finalAnswer.isEmpty {
                                 output += "\n\n" + finalAnswer
                             }
@@ -329,6 +333,7 @@ class LLMEvaluator {
 
                 // Final iteration - append any new text if we haven't already
                 if !currentIterationText.isEmpty && toolIterations > 0 && !output.contains(currentIterationText) {
+                    isFinalizingAnswer = true
                     output += "\n\n" + currentIterationText
                 }
                 

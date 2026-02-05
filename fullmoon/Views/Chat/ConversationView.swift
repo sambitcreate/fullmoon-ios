@@ -42,6 +42,7 @@ struct AnimatedActivityView: View {
 struct FadingMarkdownBlock: View {
     let text: String
     let delay: Double
+    let initialDelay: Double
     
     @State private var opacity: Double = 0
     @State private var offset: CGFloat = 5
@@ -52,7 +53,7 @@ struct FadingMarkdownBlock: View {
             .opacity(opacity)
             .offset(y: offset)
             .onAppear {
-                withAnimation(.easeOut(duration: 0.2).delay(delay)) {
+                withAnimation(.easeOut(duration: 0.2).delay(initialDelay + delay)) {
                     opacity = 1.0
                     offset = 0
                 }
@@ -60,17 +61,22 @@ struct FadingMarkdownBlock: View {
     }
 }
 
+typealias DelayedSequentialFadeInMessageView = SequentialFadeInMessageView
+
 struct SequentialFadeInMessageView: View {
     let message: Message
+    let initialDelay: Double
     @State private var blocks: [String] = []
+    
+    init(message: Message, initialDelay: Double = 0) {
+        self.message = message
+        self.initialDelay = initialDelay
+    }
     
     var body: some View {
         if message.role == .assistant {
             let (thinking, afterThink) = processThinkingContent(message.content)
             VStack(alignment: .leading, spacing: 16) {
-                if message.usedWebSearch == true {
-                    webSearchBadge
-                }
                 if let thinking {
                     thinkingSection(thinking)
                 }
@@ -78,7 +84,7 @@ struct SequentialFadeInMessageView: View {
                 if let afterThink {
                     VStack(alignment: .leading, spacing: 12) {
                         ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
-                            FadingMarkdownBlock(text: block, delay: Double(index) * 0.2)
+                            FadingMarkdownBlock(text: block, delay: Double(index) * 0.2, initialDelay: initialDelay)
                         }
                     }
                     .onAppear {
@@ -107,19 +113,7 @@ struct SequentialFadeInMessageView: View {
         return (thinking, afterThink.isEmpty ? nil : afterThink)
     }
     
-    private var webSearchBadge: some View {
-        Text("web search")
-            .font(.caption2)
-            .fontWeight(.semibold)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .foregroundStyle(.white)
-            .background(
-                Capsule()
-                    .fill(Color.blue)
-            )
-    }
-    
+
     private func thinkingSection(_ thinking: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -357,10 +351,22 @@ struct ConversationView: View {
 
                     if llm.running && thread.id == generatingThreadID {
                         VStack(alignment: .leading, spacing: 12) {
-                            // Show output first
-                            if !llm.output.isEmpty {
-                                MessageView(message: Message(role: .assistant, content: llm.output + " 🌕"))
+                            // Show output based on whether we're finalizing
+                            if llm.isFinalizingAnswer {
+                                // Hide streaming, show fade-in animation with 0.5s initial delay
+                                if !llm.output.isEmpty {
+                                    DelayedSequentialFadeInMessageView(
+                                        message: Message(role: .assistant, content: llm.output),
+                                        initialDelay: 0.5
+                                    )
                                     .padding(.horizontal)
+                                }
+                            } else {
+                                // Show normal streaming output
+                                if !llm.output.isEmpty {
+                                    MessageView(message: Message(role: .assistant, content: llm.output + " 🌕"))
+                                        .padding(.horizontal)
+                                }
                             }
                             
                             // Show only the latest activity below the output with smooth transitions
