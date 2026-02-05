@@ -18,35 +18,6 @@ struct ModelsSettingsView: View {
     
     var body: some View {
         Form {
-            Section(header: Text("installed")) {
-                ForEach(appManager.installedModels, id: \.self) { modelName in
-                    Button {
-                        Task {
-                            await switchModel(modelName)
-                        }
-                    } label: {
-                        Label {
-                            Text(appManager.modelDisplayName(modelName))
-                                .tint(.primary)
-                        } icon: {
-                            Image(systemName: appManager.currentModelSource == .local && appManager.currentModelName == modelName ? "checkmark.circle.fill" : "circle")
-                        }
-                    }
-                    #if os(macOS)
-                    .buttonStyle(.borderless)
-                    #endif
-                }
-            }
-            
-            Button {
-                showOnboardingInstallModelView.toggle()
-            } label: {
-                Label("install a model", systemImage: "arrow.down.circle.dotted")
-            }
-            #if os(macOS)
-            .buttonStyle(.borderless)
-            #endif
-
             Section(header: Text("cloud endpoint")) {
                 TextField("API base URL (OpenAI-compatible)", text: $appManager.cloudAPIBaseURL)
                     #if os(iOS) || os(visionOS)
@@ -117,6 +88,35 @@ struct ModelsSettingsView: View {
                     .disabled(newCloudModelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
+
+            Section(header: Text("installed")) {
+                ForEach(appManager.installedModels, id: \.self) { modelName in
+                    Button {
+                        Task {
+                            await switchModel(modelName)
+                        }
+                    } label: {
+                        Label {
+                            Text(appManager.modelDisplayName(modelName))
+                                .tint(.primary)
+                        } icon: {
+                            Image(systemName: appManager.currentModelSource == .local && appManager.currentModelName == modelName ? "checkmark.circle.fill" : "circle")
+                        }
+                    }
+                    #if os(macOS)
+                    .buttonStyle(.borderless)
+                    #endif
+                }
+            }
+
+            Button {
+                showOnboardingInstallModelView.toggle()
+            } label: {
+                Label("install a model", systemImage: "arrow.down.circle.dotted")
+            }
+            #if os(macOS)
+            .buttonStyle(.borderless)
+            #endif
         }
         .formStyle(.grouped)
         .navigationTitle("models")
