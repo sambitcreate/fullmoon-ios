@@ -48,8 +48,7 @@ class LLMEvaluator {
     }
 
     /// parameters controlling the output
-    let generateParameters = GenerateParameters(temperature: 0.5)
-    let maxTokens = 4096
+    let generateParameters = GenerateParameters(maxTokens: 4096, temperature: 0.5)
 
     /// update the display every N tokens -- 4 looks like it updates continuously
     /// and is low overhead.  observed ~15% reduction in tokens/s when updating
@@ -119,44 +118,45 @@ class LLMEvaluator {
             // each time you generate you will get something new
             MLXRandom.seed(UInt64(Date.timeIntervalSinceReferenceDate * 1000))
 
-            let result = try await modelContainer.perform { context in
+            let result = try await modelContainer.perform { (context: ModelContext) async throws -> (String, Double) in
                 let input = try await context.processor.prepare(input: .init(messages: promptHistory))
                 let stream = try MLXLMCommon.generate(
                     input: input, cache: nil, parameters: generateParameters, context: context
                 )
 
-                var tokens: [Int] = []
-                for await token in stream {
-                    tokens.append(token)
+                var outputText = ""
+                var chunkCount = 0
+                var tokensPerSecond: Double?
 
-                    var cancelled = false
-                    Task { @MainActor in
-                        cancelled = self.cancelled
-                    }
+                for await generation in stream {
+                    if let chunk = generation.chunk {
+                        outputText += chunk
+                        chunkCount += 1
 
-                    if tokens.count % displayEveryNTokens == 0 {
-                        let text = context.tokenizer.decode(tokens: tokens)
-                        Task { @MainActor in
-                            self.output = text
+                        if chunkCount % displayEveryNTokens == 0 {
+                            let currentOutput = outputText
+                            Task { @MainActor in
+                                self.output = currentOutput
+                            }
                         }
+                    } else if let info = generation.info {
+                        tokensPerSecond = info.tokensPerSecond
                     }
 
-                    if tokens.count >= maxTokens || cancelled {
+                    let cancelled = await MainActor.run { self.cancelled }
+                    if cancelled {
                         break
                     }
                 }
 
-                return GenerateResult(
-                    output: context.tokenizer.decode(tokens: tokens),
-                    tokensPerSecond: Double(tokens.count) / (self.elapsedTime ?? 1.0)
-                )
+                return (outputText, tokensPerSecond ?? 0)
             }
 
             // update the text if needed, e.g. we haven't displayed because of displayEveryNTokens
-            if result.output != output {
-                output = result.output
+            if result.0 != output {
+                output = result.0
             }
-            stat = " Tokens/second: \(String(format: "%.3f", result.tokensPerSecond))"
+            stat = " Tokens/second: \(String(format: "%.3f", result.1))"
 
         } catch {
             output = "Failed: \(error)"

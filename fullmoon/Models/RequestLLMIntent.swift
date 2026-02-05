@@ -36,12 +36,11 @@ struct RequestLLMIntent: AppIntent {
         return ""
     }
     
-    let thread = Thread() // create a new thread for this intent
-
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
         let llm = LLMEvaluator()
         let appManager = AppManager()
+        let thread = Thread() // create a new thread for this intent
 
         if prompt.isEmpty {
             if let output = thread.messages.last?.content {
