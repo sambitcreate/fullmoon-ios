@@ -17,9 +17,9 @@ struct WebSearchSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Toggle("enable web search", isOn: $appManager.webSearchEnabled)
+                Toggle("enable search", isOn: $appManager.webSearchEnabled)
             } footer: {
-                Text("when enabled, cloud models can call web search for up-to-date information")
+                Text("when enabled, cloud models can call search for up-to-date information")
                     .font(.caption)
             }
 
@@ -31,14 +31,14 @@ struct WebSearchSettingsView: View {
                     .autocorrectionDisabled()
 
                 if appManager.webSearchEnabled && trimmedAPIKey.isEmpty {
-                    Text("add an EXA API key to use web search")
+                    Text("add an EXA API key to use search")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
         }
         .formStyle(.grouped)
-        .navigationTitle("web search")
+        .navigationTitle("search")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif

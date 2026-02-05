@@ -51,7 +51,7 @@ struct ModelsSettingsView: View {
 
                     Toggle(isOn: $appManager.webSearchEnabled) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Web search")
+                            Text("Search")
                             Text("Lets cloud models call Exa for citations")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)

@@ -36,7 +36,7 @@ struct SettingsView: View {
                     }
 
                     NavigationLink(destination: WebSearchSettingsView()) {
-                        Label("web search", systemImage: "globe")
+                        Label("search", systemImage: "globe")
                     }
                 }
 
