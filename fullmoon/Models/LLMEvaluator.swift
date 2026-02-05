@@ -80,7 +80,8 @@ class LLMEvaluator {
 
     /// parameters controlling the output
     let generateParameters = GenerateParameters(maxTokens: 4096, temperature: 0.5)
-    private let titleGenerateParameters = GenerateParameters(maxTokens: 64, temperature: 0.5)
+    // Increased maxTokens to 256 to allow reasoning models to complete their thinking and output a title
+    private let titleGenerateParameters = GenerateParameters(maxTokens: 256, temperature: 0.5)
 
     /// update the display every N tokens -- 4 looks like it updates continuously
     /// and is low overhead.  observed ~15% reduction in tokens/s when updating
@@ -477,8 +478,7 @@ class LLMEvaluator {
         }
 
         let messages = makeOpenAIChatMessages(thread: thread, systemPrompt: systemPrompt)
-        // Use simple json_object type instead of json_schema - more widely supported
-        let titleResponseFormat = OpenAIClient.ResponseFormat(type: "json_object", jsonSchema: nil)
+        // Don't use response_format - some models don't support it and output reasoning instead
         let requestBody = OpenAIClient.ChatRequest(
             model: modelName,
             messages: messages,
@@ -487,7 +487,7 @@ class LLMEvaluator {
             stream: false,
             tools: nil,
             toolChoice: nil,
-            responseFormat: titleResponseFormat
+            responseFormat: nil
         )
 
         let maxAttempts = 2
@@ -858,6 +858,14 @@ class LLMEvaluator {
             return false
         }
         if trimmed.hasPrefix("#") || trimmed.hasPrefix(">") || trimmed.hasSuffix(":") {
+            return false
+        }
+        // Reject bullet points (model reasoning artifacts)
+        if trimmed.hasPrefix("*") || trimmed.hasPrefix("-") || trimmed.hasPrefix("•") {
+            return false
+        }
+        // Reject if it contains "Input:" (model quoting its analysis)
+        if lower.contains("input:") || lower.contains("output:") {
             return false
         }
 

@@ -525,6 +525,16 @@ struct OpenAIClient {
                 return true
             }
 
+            // Reject bullet points (model reasoning artifacts)
+            if trimmed.hasPrefix("*") || trimmed.hasPrefix("-") || trimmed.hasPrefix("•") {
+                return true
+            }
+
+            // Reject if it contains "Input:" or "Output:" (model quoting its analysis)
+            if lower.contains("input:") || lower.contains("output:") {
+                return true
+            }
+
             // Reject numbered list items like "1. Analyze..." or "2. Identify..."
             if let listRegex = try? NSRegularExpression(pattern: #"^\s*\d+[\.\)]\s+"#, options: []),
                listRegex.firstMatch(in: text, options: [], range: NSRange(location: 0, length: text.utf16.count)) != nil {
