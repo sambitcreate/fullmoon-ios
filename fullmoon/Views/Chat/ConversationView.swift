@@ -8,6 +8,146 @@
 import MarkdownUI
 import SwiftUI
 
+struct AnimatedActivityView: View {
+    let activity: AgentActivity
+    @State private var opacity: Double = 0
+    @State private var offset: CGFloat = 20
+    
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(.secondary)
+                .frame(width: 4, height: 4)
+            
+            Text(activity.description)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .italic()
+        }
+        .opacity(opacity)
+        .offset(y: offset)
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.3)) {
+                opacity = 0.7
+                offset = 0
+            }
+        }
+        .transition(.asymmetric(
+            insertion: .offset(y: 20).combined(with: .opacity),
+            removal: .offset(y: -20).combined(with: .opacity)
+        ))
+    }
+}
+
+struct FadingMarkdownBlock: View {
+    let text: String
+    let delay: Double
+    
+    @State private var opacity: Double = 0
+    @State private var offset: CGFloat = 5
+    
+    var body: some View {
+        Markdown(text)
+            .textSelection(.enabled)
+            .opacity(opacity)
+            .offset(y: offset)
+            .onAppear {
+                withAnimation(.easeOut(duration: 0.2).delay(delay)) {
+                    opacity = 1.0
+                    offset = 0
+                }
+            }
+    }
+}
+
+struct SequentialFadeInMessageView: View {
+    let message: Message
+    @State private var blocks: [String] = []
+    
+    var body: some View {
+        if message.role == .assistant {
+            let (thinking, afterThink) = processThinkingContent(message.content)
+            VStack(alignment: .leading, spacing: 16) {
+                if message.usedWebSearch == true {
+                    webSearchBadge
+                }
+                if let thinking {
+                    thinkingSection(thinking)
+                }
+                
+                if let afterThink {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
+                            FadingMarkdownBlock(text: block, delay: Double(index) * 0.2)
+                        }
+                    }
+                    .onAppear {
+                        // Split content into blocks by paragraphs (double newline)
+                        let paragraphs = afterThink.components(separatedBy: "\n\n")
+                        blocks = paragraphs.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                    }
+                }
+            }
+            .padding(.trailing, 48)
+        } else {
+            MessageView(message: message)
+        }
+    }
+    
+    private func processThinkingContent(_ content: String) -> (String?, String?) {
+        guard let startRange = content.range(of: "<think>") else {
+            return (nil, content.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        guard let endRange = content.range(of: "</think>") else {
+            let thinking = String(content[startRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            return (thinking, nil)
+        }
+        let thinking = String(content[startRange.upperBound ..< endRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let afterThink = String(content[endRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return (thinking, afterThink.isEmpty ? nil : afterThink)
+    }
+    
+    private var webSearchBadge: some View {
+        Text("web search")
+            .font(.caption2)
+            .fontWeight(.semibold)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .foregroundStyle(.white)
+            .background(
+                Capsule()
+                    .fill(Color.blue)
+            )
+    }
+    
+    private func thinkingSection(_ thinking: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12))
+                    .fontWeight(.medium)
+                Text("thought for 0s")
+                    .italic()
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+        }
+    }
+}
+
+struct LatestActivityView: View {
+    let activities: [AgentActivity]
+    
+    var body: some View {
+        if let latestActivity = activities.last {
+            AnimatedActivityView(activity: latestActivity)
+                .id(latestActivity.id)
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+        }
+    }
+}
+
 extension TimeInterval {
     var formatted: String {
         let totalSeconds = Int(self)
@@ -135,14 +275,6 @@ struct MessageView: View {
                     if let afterThink {
                         Markdown(afterThink)
                             .textSelection(.enabled)
-                            .markdownBlockStyle(\.blockquote) { configuration in
-                                configuration.label
-                                    .markdownTextStyle {
-                                        FontSize(.em(0.85))
-                                        ForegroundColor(.secondary.opacity(0.7))
-                                    }
-                                    .padding(.leading, 8)
-                            }
                     }
                 }
                 .padding(.trailing, 48)
@@ -204,22 +336,39 @@ struct ConversationView: View {
     @State private var scrollID: String?
     @State private var scrollInterrupted = false
     @State private var lastScrollTime: Date = .distantPast
+    @State private var lastCompletedMessageID: UUID?
 
     var body: some View {
         ScrollViewReader { scrollView in
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(thread.sortedMessages) { message in
-                        MessageView(message: message)
-                            .padding()
-                            .id(message.id.uuidString)
-                    }
-
-                    if llm.running && !llm.output.isEmpty && thread.id == generatingThreadID {
-                        VStack {
-                            MessageView(message: Message(role: .assistant, content: llm.output + " 🌕"))
+                        Group {
+                            if message.role == .assistant && message.id == lastCompletedMessageID {
+                                // Apply sequential fade-in animation to the most recently completed message
+                                SequentialFadeInMessageView(message: message)
+                            } else {
+                                MessageView(message: message)
+                            }
                         }
                         .padding()
+                        .id(message.id.uuidString)
+                    }
+
+                    if llm.running && thread.id == generatingThreadID {
+                        VStack(alignment: .leading, spacing: 12) {
+                            // Show output first
+                            if !llm.output.isEmpty {
+                                MessageView(message: Message(role: .assistant, content: llm.output + " 🌕"))
+                                    .padding(.horizontal)
+                            }
+                            
+                            // Show only the latest activity below the output with smooth transitions
+                            if !llm.agentActivities.isEmpty {
+                                LatestActivityView(activities: llm.agentActivities)
+                            }
+                        }
+                        .padding(.vertical)
                         .id("output")
                         .onAppear {
                             print("output appeared")
@@ -252,6 +401,15 @@ struct ConversationView: View {
                 // interrupt auto scroll to bottom if user scrolls away
                 if llm.running {
                     scrollInterrupted = true
+                }
+            }
+            .onChange(of: llm.running) { wasRunning, isRunning in
+                // Detect when generation completes
+                if wasRunning && !isRunning {
+                    // Generation just finished - mark the last message for fade-in animation
+                    if let lastMessage = thread.sortedMessages.last, lastMessage.role == .assistant {
+                        lastCompletedMessageID = lastMessage.id
+                    }
                 }
             }
         }
