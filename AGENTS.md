@@ -49,7 +49,7 @@ fullmoon-ios/
 │   ├── Models/                        # Core model classes
 │   │   ├── Data.swift                # AppManager, Message, Thread, enums
 │   │   ├── ExaClient.swift            # Exa search client + request/response models
-│   │   ├── LLMEvaluator.swift        # LLM generation and evaluation logic
+│   │   ├── LLMEvaluator.swift        # LLM generation, evaluation, and agent activities
 │   │   ├── DeviceStat.swift          # GPU/memory usage tracking
 │   │   ├── OpenAIClient.swift         # OpenAI-compatible API client (models + chat)
 │   │   ├── Models.swift              # Model configurations and registry
@@ -105,7 +105,9 @@ Dependencies are managed through Xcode's SPM integration (no Package.swift file 
 ### Web Search (Exa)
 
 - **Settings**: Web Search is toggled in Settings and requires an EXA API key.
-- **Tools**: Cloud chats expose `web_search` and `exa_search` tool aliases; responses are built from Exa highlights.
+- **Tools**: Cloud chats expose `web_search`, `exa_search`, and `finalize_answer` tools.
+- **Activity display**: Agent activities (thinking, searching) are displayed inline as blockquotes (`> *thinking...*`, `> *searching: query*`).
+- **finalize_answer tool**: Models call this tool to explicitly signal completion and submit their final answer.
 - **Badge**: Assistant messages show a blue "web search" badge when tools were used.
 - **Note**: Web search only runs for cloud models; local models ignore the tool loop.
 
@@ -113,7 +115,16 @@ Dependencies are managed through Xcode's SPM integration (no Package.swift file 
 
 - **Toggle**: Added in the model picker (Models settings).
 - **Behavior**: Appends `ThinkingModePrompt.text` to the system prompt for cloud models only.
+- **Agentic loop**: Enables extended research with up to 8 tool iterations (can extend to 12 if model is still searching).
+- **Normal mode**: Limited to 2 tool iterations for cost control.
 - **System prompt**: `AppManager.effectiveSystemPrompt` controls the combined prompt.
+
+### Agent Activities
+
+- **Activity types**: `AgentActivityType` enum tracks `thinking` and `searching(query: String)` states.
+- **Activity list**: `LLMEvaluator.agentActivities` stores activity history during generation.
+- **Inline display**: Activities are appended to output as blockquote-style system messages for transparency.
+- **UI styling**: Blockquotes use smaller font size (0.85em) and reduced opacity (0.7) for visual distinction.
 
 ### SwiftData Models
 
@@ -141,7 +152,7 @@ The following APIs have been updated:
 ### Environment Objects
 
 - `AppManager` - App-wide settings and state
-- `LLMEvaluator` - LLM generation state
+- `LLMEvaluator` - LLM generation state and agent activities
 - `DeviceStat` - Hardware monitoring
 
 ### View Modifiers
@@ -163,6 +174,7 @@ Use `appManager.userInterfaceIdiom` for UI adaptation:
 3. **Use AsyncStream for generation** - Better concurrency support
 4. **Follow Swift 6 strict concurrency** - Remove explicit Sendable when unnecessary
 5. **Update deprecated APIs** - Check compiler warnings for MLX changes
+6. **Throttle scroll updates** - For streaming content, throttle scroll position updates to every 100ms to improve performance
 
 ## Troubleshooting
 

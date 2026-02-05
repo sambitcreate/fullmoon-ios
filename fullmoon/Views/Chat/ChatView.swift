@@ -306,7 +306,8 @@ struct ChatView: View {
                             apiBaseURL: appManager.cloudAPIBaseURL,
                             apiKey: appManager.cloudAPIKey,
                             webSearchEnabled: appManager.webSearchEnabled,
-                            exaAPIKey: appManager.exaAPIKey
+                            exaAPIKey: appManager.exaAPIKey,
+                            thinkingModeEnabled: appManager.thinkingModeEnabled
                         )
                         sendMessage(Message(
                             role: .assistant,

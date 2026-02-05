@@ -135,6 +135,14 @@ struct MessageView: View {
                     if let afterThink {
                         Markdown(afterThink)
                             .textSelection(.enabled)
+                            .markdownBlockStyle(\.blockquote) { configuration in
+                                configuration.label
+                                    .markdownTextStyle {
+                                        FontSize(.em(0.85))
+                                        ForegroundColor(.secondary.opacity(0.7))
+                                    }
+                                    .padding(.leading, 8)
+                            }
                     }
                 }
                 .padding(.trailing, 48)
@@ -195,6 +203,7 @@ struct ConversationView: View {
 
     @State private var scrollID: String?
     @State private var scrollInterrupted = false
+    @State private var lastScrollTime: Date = .distantPast
 
     var body: some View {
         ScrollViewReader { scrollView in
@@ -227,8 +236,10 @@ struct ConversationView: View {
             }
             .scrollPosition(id: $scrollID, anchor: .bottom)
             .onChange(of: llm.output) { _, _ in
-                // auto scroll to bottom
-                if !scrollInterrupted {
+                // Throttle scroll updates to every 100ms
+                let now = Date()
+                if !scrollInterrupted && now.timeIntervalSince(lastScrollTime) > 0.1 {
+                    lastScrollTime = now
                     scrollView.scrollTo("bottom")
                 }
 
@@ -236,6 +247,7 @@ struct ConversationView: View {
                     appManager.playHaptic()
                 }
             }
+
             .onChange(of: scrollID) { _, _ in
                 // interrupt auto scroll to bottom if user scrolls away
                 if llm.running {

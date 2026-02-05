@@ -16,6 +16,26 @@ enum LLMEvaluatorError: Error {
     case modelNotFound(String)
 }
 
+enum AgentActivityType: Equatable {
+    case thinking
+    case searching(query: String)
+}
+
+struct AgentActivity: Identifiable, Equatable {
+    let id = UUID()
+    let type: AgentActivityType
+    let timestamp = Date()
+    
+    var description: String {
+        switch type {
+        case .thinking:
+            return "thinking..."
+        case .searching(let query):
+            return "searching: \(query)"
+        }
+    }
+}
+
 @Observable
 @MainActor
 class LLMEvaluator {
@@ -29,6 +49,7 @@ class LLMEvaluator {
     var collapsed: Bool = false
     var isThinking: Bool = false
     var lastUsedWebSearch: Bool = false
+    var agentActivities: [AgentActivity] = []
 
     var elapsedTime: TimeInterval? {
         if let startTime {
@@ -100,6 +121,17 @@ class LLMEvaluator {
         cancelled = true
         cloudRequestTask?.cancel()
         cloudRequestTask = nil
+        agentActivities.removeAll()
+    }
+    
+    private func addActivity(_ type: AgentActivityType) {
+        let activity = AgentActivity(type: type)
+        agentActivities.append(activity)
+        // Don't append to output - activities will be displayed separately with animations
+    }
+    
+    private func clearActivities() {
+        agentActivities.removeAll()
     }
 
     func generate(modelName: String, thread: Thread, systemPrompt: String) async -> String {
@@ -179,7 +211,8 @@ class LLMEvaluator {
         apiBaseURL: String,
         apiKey: String,
         webSearchEnabled: Bool,
-        exaAPIKey: String
+        exaAPIKey: String,
+        thinkingModeEnabled: Bool = false
     ) async -> String {
         guard !running else { return "" }
 
@@ -191,6 +224,7 @@ class LLMEvaluator {
         isThinking = false
         thinkingTime = nil
         lastUsedWebSearch = false
+        clearActivities()
 
         defer {
             running = false
@@ -205,15 +239,25 @@ class LLMEvaluator {
 
             let trimmedExaKey = exaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
             let webSearchAvailable = webSearchEnabled && !trimmedExaKey.isEmpty
-            let tools = webSearchAvailable ? [webSearchTool, exaSearchTool] : nil
+            let tools = webSearchAvailable ? [webSearchTool, exaSearchTool, finalizeAnswerTool] : nil
             let toolChoice = webSearchAvailable ? "auto" : nil
 
             var messages = makeOpenAIChatMessages(thread: thread, systemPrompt: systemPrompt)
-            var outputText = ""
+            var currentIterationText = ""
             var toolIterations = 0
-            let maxToolIterations = webSearchAvailable ? 2 : 0
+            // Thinking mode expects an agentic loop with multiple iterations for research
+            // Without thinking mode, we limit to 2 iterations to prevent runaway costs
+            // The model should call finalize_answer when done; limit is a safety net
+            let baseLimit = thinkingModeEnabled ? 8 : 2
+            let maxLimit = thinkingModeEnabled ? 12 : 2
+            var maxToolIterations = webSearchAvailable ? baseLimit : 0
 
             while true {
+                // Add thinking activity at the start of each iteration (after the first)
+                if toolIterations > 0 {
+                    addActivity(.thinking)
+                }
+                
                 let requestBody = OpenAIClient.ChatRequest(
                     model: modelName,
                     messages: messages,
@@ -226,37 +270,68 @@ class LLMEvaluator {
                 let request = try OpenAIClient.makeChatRequest(baseURL: baseURL, apiKey: apiKey, body: requestBody)
                 let result = try await streamChatResponse(request: request)
 
-                outputText = result.text
+                currentIterationText = result.text
                 var toolCalls = result.toolCalls
 
-                if outputText.isEmpty, !result.rawResponse.isEmpty, let data = result.rawResponse.data(using: .utf8) {
+                if currentIterationText.isEmpty, !result.rawResponse.isEmpty, let data = result.rawResponse.data(using: .utf8) {
                     if let fallback = OpenAIClient.extractChatCompletionContent(from: data) {
-                        outputText = fallback
+                        currentIterationText = fallback
                     }
                     if toolCalls.isEmpty, let fallbackToolCalls = OpenAIClient.extractChatCompletionToolCalls(from: data) {
                         toolCalls = fallbackToolCalls
                     }
                 }
 
+                // Don't overwrite output on subsequent iterations - activities are already appended
+                // Only update if we have new text from this iteration
+                if !currentIterationText.isEmpty && (toolIterations == 0 || !output.contains(currentIterationText)) {
+                    if toolIterations == 0 {
+                        // First iteration - set the initial output
+                        output = currentIterationText
+                    }
+                    // Note: activities are added via addActivity() which appends to output
+                }
+
                 if !toolCalls.isEmpty {
                     if webSearchAvailable, toolIterations < maxToolIterations {
-                        output = "Searching the web..."
-                        let toolMessages = await handleToolCalls(toolCalls, apiKey: trimmedExaKey)
-                        messages.append(.init(role: Role.assistant.rawValue, content: nil, toolCalls: toolCalls))
-                        messages.append(contentsOf: toolMessages)
+                        let toolResult = await handleToolCalls(toolCalls, apiKey: trimmedExaKey)
+                        
+                        // Check if finalize_answer was called
+                        if let finalAnswer = toolResult.finalAnswer {
+                            // Model signaled completion with finalize_answer
+                            if !finalAnswer.isEmpty {
+                                output += "\n\n" + finalAnswer
+                            }
+                            thinkingTime = elapsedTime
+                            break
+                        }
+                        
+                        // Continue with search tools
+                        messages.append(.init(role: Role.assistant.rawValue, content: currentIterationText.isEmpty ? nil : currentIterationText, toolCalls: toolCalls))
+                        messages.append(contentsOf: toolResult.messages)
                         lastUsedWebSearch = true
                         toolIterations += 1
+                        
+                        // Dynamic limit extension: if we've hit base limit but model is still searching
+                        // (not trying to finalize), allow up to maxLimit
+                        if toolIterations >= baseLimit && toolIterations < maxLimit && webSearchAvailable {
+                            maxToolIterations = maxLimit
+                        }
+                        
                         continue
-                    } else if outputText.isEmpty {
-                        outputText = webSearchAvailable
+                    } else if currentIterationText.isEmpty {
+                        currentIterationText = webSearchAvailable
                             ? "Web search tool budget reached for this message."
                             : "Web search is disabled or missing an EXA API key."
+                        output = currentIterationText
                     }
                 }
 
-                if outputText != output {
-                    output = outputText
+                // Final iteration - append any new text if we haven't already
+                if !currentIterationText.isEmpty && toolIterations > 0 && !output.contains(currentIterationText) {
+                    output += "\n\n" + currentIterationText
                 }
+                
                 thinkingTime = elapsedTime
                 break
             }
@@ -274,6 +349,18 @@ class LLMEvaluator {
         enum CodingKeys: String, CodingKey {
             case query
             case numResults = "num_results"
+        }
+    }
+    
+    private struct FinalizeAnswerArguments: Decodable {
+        let answerMarkdown: String
+        let usedEvidenceIds: [String]?
+        let openQuestions: [String]?
+        
+        enum CodingKeys: String, CodingKey {
+            case answerMarkdown = "answer_markdown"
+            case usedEvidenceIds = "used_evidence_ids"
+            case openQuestions = "open_questions"
         }
     }
 
@@ -339,6 +426,42 @@ class LLMEvaluator {
             )
         )
     }
+    
+    private var finalizeAnswerTool: OpenAIClient.Tool {
+        OpenAIClient.Tool(
+            function: .init(
+                name: "finalize_answer",
+                description: "Submit your final answer when you have gathered enough information. You MUST use this tool to complete your response.",
+                parameters: .init(
+                    type: "object",
+                    properties: [
+                        "answer_markdown": .init(
+                            type: "string",
+                            description: "Your final answer in markdown format. This will be shown to the user.",
+                            enumValues: nil,
+                            minimum: nil,
+                            maximum: nil
+                        ),
+                        "used_evidence_ids": .init(
+                            type: "array",
+                            description: "Optional: Evidence IDs you referenced (for future use).",
+                            enumValues: nil,
+                            minimum: nil,
+                            maximum: nil
+                        ),
+                        "open_questions": .init(
+                            type: "array",
+                            description: "Optional: Any remaining questions or uncertainties.",
+                            enumValues: nil,
+                            minimum: nil,
+                            maximum: nil
+                        )
+                    ],
+                    required: ["answer_markdown"]
+                )
+            )
+        )
+    }
 
     private func streamChatResponse(request: URLRequest) async throws -> CloudStreamResult {
         let (bytes, response) = try await URLSession.shared.bytes(for: request)
@@ -397,12 +520,40 @@ class LLMEvaluator {
         )
     }
 
-    private func handleToolCalls(_ toolCalls: [OpenAIClient.ToolCall], apiKey: String) async -> [OpenAIClient.ChatMessage] {
+    private struct ToolCallResult {
+        let messages: [OpenAIClient.ChatMessage]
+        let finalAnswer: String?
+    }
+    
+    private func handleToolCalls(_ toolCalls: [OpenAIClient.ToolCall], apiKey: String) async -> ToolCallResult {
         var messages: [OpenAIClient.ChatMessage] = []
+        var finalAnswer: String? = nil
 
         for call in toolCalls {
             let toolCallId = call.id ?? UUID().uuidString
-            if call.function.name == "web_search" || call.function.name == "exa_search" {
+            
+            if call.function.name == "finalize_answer" {
+                guard let data = call.function.arguments.data(using: .utf8) else {
+                    let payload = ToolErrorPayload(error: "invalid tool arguments")
+                    messages.append(.init(role: "tool", content: encodePayload(payload), toolCallId: toolCallId))
+                    continue
+                }
+                
+                do {
+                    let args = try JSONDecoder().decode(FinalizeAnswerArguments.self, from: data)
+                    finalAnswer = args.answerMarkdown
+                    
+                    // Send success response back to model
+                    let successPayload = ["status": "success", "message": "Answer finalized"]
+                    if let jsonData = try? JSONSerialization.data(withJSONObject: successPayload),
+                       let jsonString = String(data: jsonData, encoding: .utf8) {
+                        messages.append(.init(role: "tool", content: jsonString, toolCallId: toolCallId))
+                    }
+                } catch {
+                    let payload = ToolErrorPayload(error: error.localizedDescription)
+                    messages.append(.init(role: "tool", content: encodePayload(payload), toolCallId: toolCallId))
+                }
+            } else if call.function.name == "web_search" || call.function.name == "exa_search" {
                 guard let data = call.function.arguments.data(using: .utf8) else {
                     let payload = ToolErrorPayload(error: "invalid tool arguments")
                     messages.append(.init(role: "tool", content: encodePayload(payload), toolCallId: toolCallId))
@@ -418,6 +569,9 @@ class LLMEvaluator {
                         continue
                     }
 
+                    // Add search activity with the actual query
+                    addActivity(.searching(query: trimmedQuery))
+                    
                     let limit = min(max(args.numResults ?? 5, 1), 10)
                     let client = ExaClient(apiKey: apiKey)
                     let response = try await client.search(query: trimmedQuery, numResults: limit, includeHighlights: true)
@@ -445,7 +599,7 @@ class LLMEvaluator {
             }
         }
 
-        return messages
+        return ToolCallResult(messages: messages, finalAnswer: finalAnswer)
     }
 
     private func snippet(from result: ExaResult) -> String? {
