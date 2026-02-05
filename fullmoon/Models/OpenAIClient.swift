@@ -355,6 +355,41 @@ struct OpenAIClient {
         return extractChatCompletionContent(from: data) ?? ""
     }
 
+    static func extractJSONTitle(from data: Data) -> String? {
+        func parseJSONTitle(from text: String) -> String? {
+            guard let start = text.firstIndex(of: "{"), let end = text.lastIndex(of: "}") else {
+                return nil
+            }
+            let slice = String(text[start...end])
+            guard let sliceData = slice.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: sliceData) as? [String: Any],
+                  let title = object["title"] as? String else {
+                return nil
+            }
+            return title.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        guard let decoded = try? JSONDecoder().decode(ChatCompletionResponse.self, from: data) else {
+            return nil
+        }
+
+        for choice in decoded.choices {
+            if let content = choice.message?.content, let title = parseJSONTitle(from: content), !title.isEmpty {
+                return title
+            }
+        }
+
+        for choice in decoded.choices {
+            if let reasoning = choice.message?.reasoningContent,
+               let title = parseJSONTitle(from: reasoning),
+               !title.isEmpty {
+                return title
+            }
+        }
+
+        return nil
+    }
+
     static func extractChatCompletionToolCalls(from data: Data) -> [ToolCall]? {
         guard let decoded = try? JSONDecoder().decode(ChatCompletionResponse.self, from: data) else {
             return nil

@@ -437,27 +437,15 @@ class LLMEvaluator {
             request.setValue("application/json", forHTTPHeaderField: "Accept")
             request.setValue("en-US,en", forHTTPHeaderField: "Accept-Language")
             request.timeoutInterval = 20
-            let (data, response) = try await requestChatResponseData(request: request)
-            let responseText = OpenAIClient.extractChatText(from: data)
+            let (data, _) = try await requestChatResponseData(request: request)
+            let responseText = OpenAIClient.extractJSONTitle(from: data) ?? ""
             let trimmed = responseText.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty {
-                let bodyPreview = String(data: data, encoding: .utf8)?
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .prefix(500) ?? "non-utf8 body"
-                let contentType = response.value(forHTTPHeaderField: "Content-Type") ?? "unknown"
-                print("Title generation empty for model: \(modelName), status: \(response.statusCode), content-type: \(contentType)")
-                print("Title generation body preview: \(bodyPreview)")
-                var streamRequest = request
-                streamRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-                streamRequest.setValue("en-US,en", forHTTPHeaderField: "Accept-Language")
-                let streamedText = try await streamChatResponseText(request: streamRequest)
-                let streamedTrimmed = streamedText.trimmingCharacters(in: .whitespacesAndNewlines)
-                if streamedTrimmed.isEmpty {
-                    print("Title generation stream also empty for model: \(modelName)")
-                } else {
-                    print("Title generation streamed \(streamedTrimmed.count) chars for model: \(modelName)")
+                if let lastUserMessage = lastUserMessageText(from: thread),
+                   let fallbackTitle = fallbackTitle(from: lastUserMessage) {
+                    return fallbackTitle
                 }
-                return streamedText
+                return ""
             } else {
                 print("Title generation received \(trimmed.count) chars for model: \(modelName)")
                 return responseText
@@ -704,6 +692,48 @@ class LLMEvaluator {
         }
 
         return OpenAIClient.extractChatText(from: data)
+    }
+
+    private func lastUserMessageText(from thread: Thread) -> String? {
+        guard let lastUser = thread.sortedMessages.last(where: { $0.role == .user }) else {
+            return nil
+        }
+        let trimmed = lastUser.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func fallbackTitle(from text: String) -> String? {
+        let cleaned = text
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return nil }
+
+        let stopWords: Set<String> = [
+            "a", "an", "and", "are", "as", "at", "be", "but", "by",
+            "for", "from", "has", "have", "how", "if", "in", "into",
+            "is", "it", "its", "of", "on", "or", "that", "the",
+            "their", "to", "what", "which", "who", "will", "with",
+            "would", "should", "could", "can", "do", "does", "did",
+            "about", "over", "under", "up", "down", "out", "off",
+            "your", "you", "me", "my", "we", "our", "they", "them",
+            "this", "these", "those", "i"
+        ]
+
+        let tokens = cleaned
+            .split { $0.isWhitespace }
+            .map(String.init)
+
+        let filtered = tokens.filter { token in
+            let stripped = token
+                .trimmingCharacters(in: CharacterSet.punctuationCharacters)
+                .lowercased()
+            return !stripped.isEmpty && !stopWords.contains(stripped)
+        }
+
+        let source = filtered.isEmpty ? tokens : filtered
+        let limited = source.prefix(8).joined(separator: " ")
+        return limited.isEmpty ? nil : limited
     }
 
     private func requestChatResponseData(request: URLRequest) async throws -> (Data, HTTPURLResponse) {

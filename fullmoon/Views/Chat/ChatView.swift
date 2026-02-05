@@ -23,6 +23,8 @@ struct ChatView: View {
     @State var thinkingTime: TimeInterval?
     
     @State private var generatingThreadID: UUID?
+    @State private var displayedTitle: String = "chat"
+    @State private var titleOpacity: Double = 1.0
 
     var isPromptEmpty: Bool {
         prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -182,7 +184,12 @@ struct ChatView: View {
     }
 
     private var titleSystemPrompt: String {
-        "Create a short, one-line chat title of 6 to 8 words. Reply with only the title. Do not include reasoning."
+        """
+        Return ONLY valid JSON. No markdown, no prose.
+        Schema: {"title":"string"}
+        Title must be 6 to 8 words, one line, no punctuation at the end.
+        If unsure, still output a best-effort title.
+        """
     }
 
     var body: some View {
@@ -210,7 +217,8 @@ struct ChatView: View {
                 }
                 .padding()
             }
-            .navigationTitle(chatTitle)
+            .navigationTitle(displayedTitle)
+            .opacity(titleOpacity)
             #if os(iOS) || os(visionOS)
                 .navigationBarTitleDisplayMode(.inline)
             #endif
@@ -275,6 +283,22 @@ struct ChatView: View {
                     }
                     #endif
                 }
+        }
+        .onAppear {
+            displayedTitle = chatTitle
+            titleOpacity = 1.0
+        }
+        .onChange(of: chatTitle) { _, newValue in
+            guard newValue != displayedTitle else { return }
+            withAnimation(.easeOut(duration: 0.15)) {
+                titleOpacity = 0.0
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                displayedTitle = newValue
+                withAnimation(.easeIn(duration: 0.2)) {
+                    titleOpacity = 1.0
+                }
+            }
         }
     }
 
@@ -374,7 +398,8 @@ struct ChatView: View {
     }
 
     private func normalizeTitle(_ raw: String) -> String? {
-        var cleaned = stripReasoningPreamble(from: raw)
+        let extracted = extractJSONTitle(from: raw) ?? raw
+        var cleaned = stripReasoningPreamble(from: extracted)
         cleaned = cleaned.replacingOccurrences(of: "\n", with: " ")
         cleaned = cleaned.replacingOccurrences(of: "\r", with: " ")
         cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -394,18 +419,62 @@ struct ChatView: View {
         return limited.isEmpty ? nil : limited
     }
 
+    private func extractJSONTitle(from raw: String) -> String? {
+        guard let data = raw.data(using: .utf8) else { return nil }
+        if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let title = object["title"] as? String {
+            return title
+        }
+
+        // Fallback: try to locate a JSON object in the text.
+        if let start = raw.firstIndex(of: "{"), let end = raw.lastIndex(of: "}") {
+            let slice = String(raw[start...end])
+            if let sliceData = slice.data(using: .utf8),
+               let object = try? JSONSerialization.jsonObject(with: sliceData) as? [String: Any],
+               let title = object["title"] as? String {
+                return title
+            }
+        }
+
+        return nil
+    }
+
     private func stripReasoningPreamble(from text: String) -> String {
-        let lines = text
+        let raw = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.isEmpty { return raw }
+
+        let markers = ["title:", "chat title:", "final title:", "suggested title:"]
+        let lower = raw.lowercased()
+        if let range = markers.compactMap({ marker in
+            lower.range(of: marker, options: [.caseInsensitive, .backwards])
+        }).first {
+            let start = raw.index(raw.startIndex, offsetBy: lower.distance(from: lower.startIndex, to: range.upperBound))
+            let candidate = String(raw[start...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !candidate.isEmpty {
+                return candidate
+            }
+        }
+
+        let lines = raw
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
         if lines.count > 1 {
             let filtered = lines.filter { line in
-                let lower = line.lowercased()
-                if lower.hasPrefix("the user wants") { return false }
-                if lower.hasPrefix("constraints") { return false }
-                if lower.hasPrefix("1.") || lower.hasPrefix("2.") || lower.hasPrefix("-") { return false }
+                let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmedLine.hasPrefix("1.") || trimmedLine.hasPrefix("2.") || trimmedLine.hasPrefix("3.") { return false }
+                if trimmedLine.hasPrefix("-") || trimmedLine.hasPrefix("*") { return false }
+                let stripped = trimmedLine.trimmingCharacters(in: CharacterSet(charactersIn: "*-•\"'“”‘’ "))
+                let lowerLine = stripped.lowercased()
+                if lowerLine.hasPrefix("analyze") { return false }
+                if lowerLine.hasPrefix("analyze the request") { return false }
+                if lowerLine.hasPrefix("the user wants") { return false }
+                if lowerLine.hasPrefix("constraints") { return false }
+                if lowerLine.hasPrefix("constraint") { return false }
+                if lowerLine.hasPrefix("requirement") { return false }
+                if lowerLine.hasPrefix("analysis") { return false }
+                if lowerLine.hasPrefix("reasoning") { return false }
                 return true
             }
             if let candidate = filtered.last {
@@ -413,7 +482,7 @@ struct ChatView: View {
             }
         }
 
-        return text
+        return raw
     }
 
     #if os(macOS)
