@@ -12,10 +12,23 @@
 		869B97622D0DD46B0078DF5A /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = 869B97612D0DD46B0078DF5A /* MLXLMCommon */; };
 		869B97642D0DD4D80078DF5A /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = 869B97632D0DD4D80078DF5A /* MLXLLM */; };
 		869B976A2D0DD3EC0078DF5A /* MLXRandom in Frameworks */ = {isa = PBXBuildFile; productRef = 869B97692D0DD3EC0078DF5A /* MLXRandom */; };
+		DD80C4472F35421800989E36 /* secrets.xcconfig in Resources */ = {isa = PBXBuildFile; fileRef = DD80C4462F35421800989E36 /* secrets.xcconfig */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		DD80C4502F35440C00989E36 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 860E9CC62CB055B000C5BB52 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 860E9CCD2CB055B000C5BB52;
+			remoteInfo = fullmoon;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		860E9CCE2CB055B000C5BB52 /* fullmoon.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = fullmoon.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		DD80C4462F35421800989E36 /* secrets.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = secrets.xcconfig; sourceTree = "<group>"; };
+		DD80C44C2F35440B00989E36 /* fullmoonTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = fullmoonTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -37,6 +50,11 @@
 			path = fullmoon;
 			sourceTree = "<group>";
 		};
+		DD80C44D2F35440C00989E36 /* fullmoonTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = fullmoonTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -52,6 +70,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		DD80C4492F35440B00989E36 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -59,8 +84,10 @@
 			isa = PBXGroup;
 			children = (
 				860E9CD02CB055B000C5BB52 /* fullmoon */,
+				DD80C44D2F35440C00989E36 /* fullmoonTests */,
 				869B975E2D0DD3EC0078DF5A /* Frameworks */,
 				860E9CCF2CB055B000C5BB52 /* Products */,
+				DD80C4462F35421800989E36 /* secrets.xcconfig */,
 			);
 			sourceTree = "<group>";
 		};
@@ -68,6 +95,7 @@
 			isa = PBXGroup;
 			children = (
 				860E9CCE2CB055B000C5BB52 /* fullmoon.app */,
+				DD80C44C2F35440B00989E36 /* fullmoonTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -109,6 +137,29 @@
 			productReference = 860E9CCE2CB055B000C5BB52 /* fullmoon.app */;
 			productType = "com.apple.product-type.application";
 		};
+		DD80C44B2F35440B00989E36 /* fullmoonTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DD80C4522F35440C00989E36 /* Build configuration list for PBXNativeTarget "fullmoonTests" */;
+			buildPhases = (
+				DD80C4482F35440B00989E36 /* Sources */,
+				DD80C4492F35440B00989E36 /* Frameworks */,
+				DD80C44A2F35440B00989E36 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				DD80C4512F35440C00989E36 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				DD80C44D2F35440C00989E36 /* fullmoonTests */,
+			);
+			name = fullmoonTests;
+			packageProductDependencies = (
+			);
+			productName = fullmoonTests;
+			productReference = DD80C44C2F35440B00989E36 /* fullmoonTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -116,11 +167,15 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 1600;
+				LastSwiftUpdateCheck = 2630;
 				LastUpgradeCheck = 2630;
 				TargetAttributes = {
 					860E9CCD2CB055B000C5BB52 = {
 						CreatedOnToolsVersion = 16.0;
+					};
+					DD80C44B2F35440B00989E36 = {
+						CreatedOnToolsVersion = 26.3;
+						TestTargetID = 860E9CCD2CB055B000C5BB52;
 					};
 				};
 			};
@@ -146,12 +201,21 @@
 			projectRoot = "";
 			targets = (
 				860E9CCD2CB055B000C5BB52 /* fullmoon */,
+				DD80C44B2F35440B00989E36 /* fullmoonTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		860E9CCC2CB055B000C5BB52 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DD80C4472F35421800989E36 /* secrets.xcconfig in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DD80C44A2F35440B00989E36 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -168,11 +232,27 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		DD80C4482F35440B00989E36 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		DD80C4512F35440C00989E36 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 860E9CCD2CB055B000C5BB52 /* fullmoon */;
+			targetProxy = DD80C4502F35440C00989E36 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		860E9CDD2CB055B100C5BB52 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = DD80C4462F35421800989E36 /* secrets.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
@@ -237,6 +317,7 @@
 		};
 		860E9CDE2CB055B100C5BB52 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = DD80C4462F35421800989E36 /* secrets.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
@@ -389,6 +470,53 @@
 			};
 			name = Release;
 		};
+		DD80C4532F35440C00989E36 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 5WP229CBB8;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sbiswas.fullmoonTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/fullmoon.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/fullmoon";
+			};
+			name = Debug;
+		};
+		DD80C4542F35440C00989E36 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 5WP229CBB8;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sbiswas.fullmoonTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/fullmoon.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/fullmoon";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -406,6 +534,15 @@
 			buildConfigurations = (
 				860E9CE02CB055B100C5BB52 /* Debug */,
 				860E9CE12CB055B100C5BB52 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		DD80C4522F35440C00989E36 /* Build configuration list for PBXNativeTarget "fullmoonTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DD80C4532F35440C00989E36 /* Debug */,
+				DD80C4542F35440C00989E36 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

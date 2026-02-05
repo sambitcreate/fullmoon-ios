@@ -182,7 +182,7 @@ struct ChatView: View {
     }
 
     private var titleSystemPrompt: String {
-        "Create a short, one-line chat title of 6 to 8 words. Reply with only the title."
+        "Create a short, one-line chat title of 6 to 8 words. Reply with only the title. Do not include reasoning."
     }
 
     var body: some View {
@@ -374,7 +374,8 @@ struct ChatView: View {
     }
 
     private func normalizeTitle(_ raw: String) -> String? {
-        var cleaned = raw.replacingOccurrences(of: "\n", with: " ")
+        var cleaned = stripReasoningPreamble(from: raw)
+        cleaned = cleaned.replacingOccurrences(of: "\n", with: " ")
         cleaned = cleaned.replacingOccurrences(of: "\r", with: " ")
         cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
         cleaned = cleaned.trimmingCharacters(in: CharacterSet(charactersIn: "\"'“”‘’"))
@@ -391,6 +392,28 @@ struct ChatView: View {
         guard !words.isEmpty else { return nil }
         let limited = words.prefix(8).joined(separator: " ")
         return limited.isEmpty ? nil : limited
+    }
+
+    private func stripReasoningPreamble(from text: String) -> String {
+        let lines = text
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        if lines.count > 1 {
+            let filtered = lines.filter { line in
+                let lower = line.lowercased()
+                if lower.hasPrefix("the user wants") { return false }
+                if lower.hasPrefix("constraints") { return false }
+                if lower.hasPrefix("1.") || lower.hasPrefix("2.") || lower.hasPrefix("-") { return false }
+                return true
+            }
+            if let candidate = filtered.last {
+                return candidate
+            }
+        }
+
+        return text
     }
 
     #if os(macOS)

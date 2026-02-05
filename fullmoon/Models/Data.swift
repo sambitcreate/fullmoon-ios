@@ -106,6 +106,7 @@ class AppManager: ObservableObject {
     init() {
         loadInstalledModelsFromUserDefaults()
         loadCloudModelsFromUserDefaults()
+        bootstrapCloudCredentialsFromBundle()
     }
     
     func incrementNumberOfVisits() {
@@ -142,6 +143,26 @@ class AppManager: ObservableObject {
             self.cloudModels = decodedArray
         } else {
             self.cloudModels = []
+        }
+    }
+
+    private func bootstrapCloudCredentialsFromBundle() {
+        let trimmedBaseURL = cloudAPIBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedBaseURL.isEmpty,
+           let baseURL = Bundle.main.object(forInfoDictionaryKey: "CloudAPIBaseURL") as? String {
+            let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty && !trimmed.hasPrefix("$(") {
+                cloudAPIBaseURL = trimmed
+            }
+        }
+
+        let trimmedKey = cloudAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedKey.isEmpty,
+           let apiKey = Bundle.main.object(forInfoDictionaryKey: "CloudAPIKey") as? String {
+            let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty && !trimmed.hasPrefix("$(") {
+                cloudAPIKey = trimmed
+            }
         }
     }
     

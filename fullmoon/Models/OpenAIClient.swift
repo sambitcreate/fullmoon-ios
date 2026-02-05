@@ -160,11 +160,13 @@ struct OpenAIClient {
         struct Choice: Decodable {
             struct Message: Decodable {
                 let content: String?
+                let reasoningContent: String?
                 let toolCalls: [ToolCall]?
 
                 enum CodingKeys: String, CodingKey {
                     case content
                     case toolCalls = "tool_calls"
+                    case reasoningContent = "reasoning_content"
                 }
             }
 
@@ -320,6 +322,37 @@ struct OpenAIClient {
             return nil
         }
         return decoded.choices.compactMap { $0.message?.content }.joined()
+    }
+
+    static func extractChatText(from data: Data) -> String {
+        if let decoded = try? JSONDecoder().decode(ChatCompletionResponse.self, from: data) {
+            let text = decoded.choices.compactMap { message in
+                message.message?.content?.isEmpty == false
+                    ? message.message?.content
+                    : message.message?.reasoningContent
+            }.joined()
+            if !text.isEmpty {
+                return text
+            }
+        }
+
+        if let text = String(data: data, encoding: .utf8), text.contains("data:") {
+            var outputText = ""
+            let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+            for line in lines {
+                let events = (try? parseStreamLine(String(line))) ?? []
+                for event in events {
+                    if case let .delta(delta) = event {
+                        outputText += delta
+                    }
+                }
+            }
+            if !outputText.isEmpty {
+                return outputText
+            }
+        }
+
+        return extractChatCompletionContent(from: data) ?? ""
     }
 
     static func extractChatCompletionToolCalls(from data: Data) -> [ToolCall]? {

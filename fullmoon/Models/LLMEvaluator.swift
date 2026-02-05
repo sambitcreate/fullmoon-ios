@@ -435,8 +435,33 @@ class LLMEvaluator {
             )
             var request = try OpenAIClient.makeChatRequest(baseURL: baseURL, apiKey: apiKey, body: requestBody)
             request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.setValue("en-US,en", forHTTPHeaderField: "Accept-Language")
             request.timeoutInterval = 20
-            return try await requestChatResponseText(request: request)
+            let (data, response) = try await requestChatResponseData(request: request)
+            let responseText = OpenAIClient.extractChatText(from: data)
+            let trimmed = responseText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                let bodyPreview = String(data: data, encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .prefix(500) ?? "non-utf8 body"
+                let contentType = response.value(forHTTPHeaderField: "Content-Type") ?? "unknown"
+                print("Title generation empty for model: \(modelName), status: \(response.statusCode), content-type: \(contentType)")
+                print("Title generation body preview: \(bodyPreview)")
+                var streamRequest = request
+                streamRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                streamRequest.setValue("en-US,en", forHTTPHeaderField: "Accept-Language")
+                let streamedText = try await streamChatResponseText(request: streamRequest)
+                let streamedTrimmed = streamedText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if streamedTrimmed.isEmpty {
+                    print("Title generation stream also empty for model: \(modelName)")
+                } else {
+                    print("Title generation streamed \(streamedTrimmed.count) chars for model: \(modelName)")
+                }
+                return streamedText
+            } else {
+                print("Title generation received \(trimmed.count) chars for model: \(modelName)")
+                return responseText
+            }
         } catch {
             return ""
         }
@@ -678,11 +703,19 @@ class LLMEvaluator {
             throw OpenAIClientError.serverError(status: httpResponse.statusCode, body: body)
         }
 
-        guard let decoded = try? JSONDecoder().decode(OpenAIClient.ChatCompletionResponse.self, from: data) else {
-            return ""
-        }
+        return OpenAIClient.extractChatText(from: data)
+    }
 
-        return decoded.choices.compactMap { $0.message?.content }.joined()
+    private func requestChatResponseData(request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw OpenAIClientError.invalidResponse
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            throw OpenAIClientError.serverError(status: httpResponse.statusCode, body: body)
+        }
+        return (data, httpResponse)
     }
 
     private struct ToolCallResult {
