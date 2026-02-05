@@ -80,7 +80,7 @@ class LLMEvaluator {
 
     /// parameters controlling the output
     let generateParameters = GenerateParameters(maxTokens: 4096, temperature: 0.5)
-    private let titleGenerateParameters = GenerateParameters(maxTokens: 64, temperature: 0.2)
+    private let titleGenerateParameters = GenerateParameters(maxTokens: 64, temperature: 0.5)
 
     /// update the display every N tokens -- 4 looks like it updates continuously
     /// and is low overhead.  observed ~15% reduction in tokens/s when updating
@@ -284,7 +284,8 @@ class LLMEvaluator {
                     maxTokens: generateParameters.maxTokens,
                     stream: true,
                     tools: tools,
-                    toolChoice: toolChoice
+                    toolChoice: toolChoice,
+                    responseFormat: nil
                 )
                 let request = try OpenAIClient.makeChatRequest(baseURL: baseURL, apiKey: apiKey, body: requestBody)
                 let result = try await streamChatResponse(request: request)
@@ -351,7 +352,8 @@ class LLMEvaluator {
                             maxTokens: generateParameters.maxTokens,
                             stream: true,
                             tools: nil,  // No tools for final response
-                            toolChoice: nil
+                            toolChoice: nil,
+                            responseFormat: nil
                         )
                         let finalRequest = try OpenAIClient.makeChatRequest(baseURL: baseURL, apiKey: apiKey, body: finalRequestBody)
                         let finalResult = try await streamChatResponse(request: finalRequest)
@@ -475,6 +477,8 @@ class LLMEvaluator {
         }
 
         let messages = makeOpenAIChatMessages(thread: thread, systemPrompt: systemPrompt)
+        // Use simple json_object type instead of json_schema - more widely supported
+        let titleResponseFormat = OpenAIClient.ResponseFormat(type: "json_object", jsonSchema: nil)
         let requestBody = OpenAIClient.ChatRequest(
             model: modelName,
             messages: messages,
@@ -482,7 +486,8 @@ class LLMEvaluator {
             maxTokens: titleGenerateParameters.maxTokens,
             stream: false,
             tools: nil,
-            toolChoice: nil
+            toolChoice: nil,
+            responseFormat: titleResponseFormat
         )
 
         let maxAttempts = 2
@@ -837,6 +842,7 @@ class LLMEvaluator {
             return false
         }
 
+        // Reject markdown formatting artifacts
         if trimmed.contains("**") || trimmed.contains("```") || trimmed.contains("`") {
             return false
         }
@@ -844,19 +850,46 @@ class LLMEvaluator {
             return false
         }
 
+        // Reject numbered list items (e.g., "1. Analyze...", "2. Identify...")
         if let listRegex = try? NSRegularExpression(pattern: #"^\s*\d+[\.\)]\s+"#, options: []),
            listRegex.firstMatch(in: trimmed, options: [], range: NSRange(location: 0, length: trimmed.utf16.count)) != nil {
             return false
         }
 
+        // Reject reasoning prefixes that models often output
+        let reasoningPrefixes = [
+            "analyze",
+            "identify",
+            "determine",
+            "extract",
+            "consider",
+            "first,",
+            "next,",
+            "then,",
+            "finally,",
+            "step ",
+            "here is",
+            "here's",
+            "sure,",
+            "okay,",
+            "certainly",
+            "of course"
+        ]
+        if reasoningPrefixes.contains(where: { lower.hasPrefix($0) }) {
+            return false
+        }
+
         let badFragments = [
             "analyze the request",
+            "analyze the conversation",
             "analysis:",
             "reasoning:",
             "the user wants",
             "the user is asking",
+            "the user asked",
             "i should",
             "i need to",
+            "i will",
             "let me ",
             "step by step",
             "constraints",
@@ -868,9 +901,28 @@ class LLMEvaluator {
             "example title",
             "insert title",
             "json object",
-            "schema"
+            "json format",
+            "json output",
+            "json response",
+            "schema",
+            "generate a title",
+            "create a title",
+            "provide a title",
+            "the title is",
+            "title for the conversation",
+            "title for this conversation",
+            "short title for",
+            "based on the",
+            "in json format",
+            "to generate",
+            "to create"
         ]
         if badFragments.contains(where: { lower.contains($0) }) {
+            return false
+        }
+
+        // Reject if too long (likely reasoning text, not a title)
+        if trimmed.count > 80 {
             return false
         }
 

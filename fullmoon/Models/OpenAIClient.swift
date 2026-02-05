@@ -36,6 +36,62 @@ struct OpenAIClient {
         let data: [Model]
     }
 
+    struct ResponseFormat: Encodable {
+        let type: String
+        let jsonSchema: JSONSchemaDefinition?
+
+        init(type: String = "json_schema", jsonSchema: JSONSchemaDefinition? = nil) {
+            self.type = type
+            self.jsonSchema = jsonSchema
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case type
+            case jsonSchema = "json_schema"
+        }
+    }
+
+    struct JSONSchemaDefinition: Encodable {
+        let name: String
+        let description: String?
+        let schema: JSONSchemaObject
+
+        init(name: String, description: String? = nil, schema: JSONSchemaObject) {
+            self.name = name
+            self.description = description
+            self.schema = schema
+        }
+    }
+
+    struct JSONSchemaObject: Encodable {
+        let type: String
+        let properties: [String: JSONProperty]
+        let required: [String]
+        let additionalProperties: Bool
+
+        init(
+            type: String = "object",
+            properties: [String: JSONProperty],
+            required: [String],
+            additionalProperties: Bool = false
+        ) {
+            self.type = type
+            self.properties = properties
+            self.required = required
+            self.additionalProperties = additionalProperties
+        }
+    }
+
+    struct JSONProperty: Encodable {
+        let type: String
+        let description: String?
+
+        init(type: String, description: String? = nil) {
+            self.type = type
+            self.description = description
+        }
+    }
+
     struct ChatMessage: Codable {
         let role: String
         let content: String?
@@ -126,6 +182,7 @@ struct OpenAIClient {
         let stream: Bool
         let tools: [Tool]?
         let toolChoice: String?
+        let responseFormat: ResponseFormat?
 
         enum CodingKeys: String, CodingKey {
             case model
@@ -135,6 +192,7 @@ struct OpenAIClient {
             case tools
             case toolChoice = "tool_choice"
             case maxTokens = "max_tokens"
+            case responseFormat = "response_format"
         }
     }
 
@@ -442,13 +500,78 @@ struct OpenAIClient {
             return placeholderFragments.contains(where: { lower.contains($0) })
         }
 
+        func isReasoningInTitle(_ text: String) -> Bool {
+            let lower = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+            // Reject if too long (titles should be short)
+            if text.count > 80 {
+                return true
+            }
+
+            // Reject markdown formatting
+            if text.contains("**") || text.contains("```") || text.contains("`") {
+                return true
+            }
+
+            // Reject numbered list items like "1. Analyze..." or "2. Identify..."
+            if let listRegex = try? NSRegularExpression(pattern: #"^\s*\d+[\.\)]\s+"#, options: []),
+               listRegex.firstMatch(in: text, options: [], range: NSRange(location: 0, length: text.utf16.count)) != nil {
+                return true
+            }
+
+            // Reject common reasoning prefixes
+            let reasoningPrefixes = [
+                "analyze",
+                "identify",
+                "determine",
+                "extract",
+                "consider",
+                "first,",
+                "next,",
+                "then,",
+                "finally,",
+                "step ",
+                "here is",
+                "here's",
+                "sure,",
+                "okay,",
+                "certainly",
+                "of course",
+                "the user",
+                "i need to",
+                "i should",
+                "i will",
+                "let me",
+                "this is a",
+                "based on"
+            ]
+            if reasoningPrefixes.contains(where: { lower.hasPrefix($0) }) {
+                return true
+            }
+
+            // Reject common reasoning fragments
+            let reasoningFragments = [
+                "the constraints",
+                "the request",
+                "the conversation",
+                "json format",
+                "json output",
+                "generate a title",
+                "create a title",
+                "provide a title"
+            ]
+            return reasoningFragments.contains(where: { lower.contains($0) })
+        }
+
         func parseJSONObjectTitle(from text: String) -> String? {
             guard let data = text.data(using: .utf8),
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let title = object["title"] as? String else {
                 return nil
             }
-            guard let cleaned = cleanedTitle(title), !isPlaceholderTitle(cleaned) else {
+            guard let cleaned = cleanedTitle(title),
+                  !isPlaceholderTitle(cleaned),
+                  !isReasoningInTitle(cleaned) else {
                 return nil
             }
             return cleaned
@@ -480,21 +603,68 @@ struct OpenAIClient {
             let escaped = String(text[titleRange])
             guard let wrapped = "\"\(escaped)\"".data(using: .utf8),
                   let decoded = try? JSONDecoder().decode(String.self, from: wrapped) else {
-                guard let cleaned = cleanedTitle(escaped), !isPlaceholderTitle(cleaned) else {
+                guard let cleaned = cleanedTitle(escaped),
+                      !isPlaceholderTitle(cleaned),
+                      !isReasoningInTitle(cleaned) else {
                     return nil
                 }
                 return cleaned
             }
-            guard let cleaned = cleanedTitle(decoded), !isPlaceholderTitle(cleaned) else {
+            guard let cleaned = cleanedTitle(decoded),
+                  !isPlaceholderTitle(cleaned),
+                  !isReasoningInTitle(cleaned) else {
                 return nil
             }
             return cleaned
+        }
+
+        func isReasoningArtifact(_ text: String) -> Bool {
+            let lower = text.lowercased()
+            let reasoningPrefixes = [
+                "the user wants",
+                "the user is asking",
+                "the user asked",
+                "i need to",
+                "i should",
+                "i will",
+                "let me",
+                "this is a request",
+                "this request",
+                "analyzing",
+                "based on",
+                "to generate",
+                "to create",
+                "here is",
+                "here's",
+                "sure,",
+                "okay,",
+                "certainly",
+                "of course"
+            ]
+            for prefix in reasoningPrefixes {
+                if lower.hasPrefix(prefix) {
+                    return true
+                }
+            }
+            let reasoningFragments = [
+                "in json format",
+                "json output",
+                "json response",
+                "short title for",
+                "title for the conversation",
+                "title for this conversation",
+                "generate a title",
+                "create a title",
+                "provide a title"
+            ]
+            return reasoningFragments.contains(where: { lower.contains($0) })
         }
 
         func parseTitleFromText(_ text: String) -> String? {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return nil }
 
+            // First priority: try to parse JSON object with title field
             if let title = parseJSONObjectTitle(from: trimmed) {
                 return title
             }
@@ -507,21 +677,37 @@ struct OpenAIClient {
                 return title
             }
 
+            // Second priority: look for embedded JSON anywhere in the text
             if let title = parseEmbeddedJSONTitle(from: trimmed) {
                 return title
             }
 
+            // Third priority: regex extraction of "title": "value"
             if let title = parseRegexTitle(from: trimmed) {
                 return title
             }
 
+            // Last resort: use first non-JSON line only if it's not reasoning
             let lines = trimmed
                 .components(separatedBy: .newlines)
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
-            if let firstLine = lines.first, !firstLine.contains("{"), !firstLine.contains("}") {
-                guard let cleaned = cleanedTitle(firstLine), !isPlaceholderTitle(cleaned) else {
-                    return nil
+            
+            // Find first line that's not reasoning and not JSON-like
+            for line in lines {
+                if line.contains("{") || line.contains("}") {
+                    continue
+                }
+                if isReasoningArtifact(line) {
+                    continue
+                }
+                if isReasoningInTitle(line) {
+                    continue
+                }
+                guard let cleaned = cleanedTitle(line),
+                      !isPlaceholderTitle(cleaned),
+                      !isReasoningInTitle(cleaned) else {
+                    continue
                 }
                 return cleaned
             }

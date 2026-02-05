@@ -190,10 +190,35 @@ struct ChatView: View {
 
     private var titleSystemPrompt: String {
         """
-        Return exactly one JSON object. No markdown and no explanation.
-        Schema: {"title":"string"}
-        Title should be 3 to 8 words, one line, no trailing punctuation.
-        If unsure, still return your best title.
+        You are a title generator. You output ONLY a JSON object with a "title" field. Nothing else.
+
+        Generate a brief title that helps the user find this conversation later.
+
+        OUTPUT FORMAT: {"title": "Your title here"}
+
+        RULES:
+        - Output MUST be valid JSON starting with { and ending with }
+        - Title must be 3-8 words, single line, ≤50 characters
+        - Title must be grammatically correct and read naturally
+        - Use the same language as the user message
+        - Focus on the main topic or question
+        - Keep exact: technical terms, numbers, filenames
+        - Remove filler words: the, this, my, a, an
+        - NO markdown formatting (no **, no `)
+        - NO explanations or reasoning
+        - NO numbered steps (1. 2. 3.)
+        - NEVER start with "Analyze", "Identify", "Determine"
+        - NEVER say you cannot generate a title
+        - Always output something meaningful
+
+        EXAMPLES:
+        User asks about debugging → {"title": "Debugging production errors"}
+        User asks about React → {"title": "React hooks best practices"}
+        User asks about database → {"title": "Postgres connection setup"}
+        User says hello → {"title": "Quick greeting"}
+        User asks about football → {"title": "Best football players"}
+
+        Output the JSON now:
         """
     }
 
