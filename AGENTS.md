@@ -58,7 +58,8 @@ fullmoon-ios/
 │   ├── Views/                         # SwiftUI views
 │   │   ├── Chat/                     # Chat interface
 │   │   ├── Settings/                 # Settings screens
-│   │   │   └── WebSearchSettingsView.swift # Web search toggle + EXA key
+│   │   │   ├── ChatModelsSettingsView.swift # Chat-only model picker (cloud model selector + thinking/search)
+│   │   │   └── WebSearchSettingsView.swift # Search toggle + EXA key
 │   │   └── Onboarding/               # First-run experience
 │   ├── Assets.xcassets/              # Images, colors, etc.
 │   └── fullmoonApp.swift            # App entry point
@@ -102,14 +103,14 @@ Dependencies are managed through Xcode's SPM integration (no Package.swift file 
   - `POST {baseURL}/chat/completions` with `stream: true`
 - **Model list**: Users can fetch models from the endpoint or add custom model IDs manually.
 
-### Web Search (Exa)
+### Search (Exa)
 
-- **Settings**: Web Search is toggled in Settings and requires an EXA API key.
+- **Settings**: Search is toggled in Settings and requires an EXA API key.
 - **Tools**: Cloud chats expose `web_search`, `exa_search`, and `finalize_answer` tools.
 - **Activity display**: Agent activities (thinking, searching) are displayed inline as blockquotes (`> *thinking...*`, `> *searching: query*`).
 - **finalize_answer tool**: Models call this tool to explicitly signal completion and submit their final answer.
 - **Badge**: Assistant messages show a blue "web search" badge when tools were used.
-- **Note**: Web search only runs for cloud models; local models ignore the tool loop.
+- **Note**: Search only runs for cloud models; local models ignore the tool loop.
 
 ### Thinking Mode
 
@@ -118,6 +119,12 @@ Dependencies are managed through Xcode's SPM integration (no Package.swift file 
 - **Agentic loop**: Enables extended research with up to 8 tool iterations (can extend to 12 if model is still searching).
 - **Normal mode**: Limited to 2 tool iterations for cost control.
 - **System prompt**: `AppManager.effectiveSystemPrompt` controls the combined prompt.
+
+### Cloud Model Selector
+
+- **Selector UI**: Cloud model lists use a compact selector (menu for ≤10 models; searchable sheet for >10).
+- **Chat model settings**: Chat-only view is trimmed to thinking, search, and cloud model selector.
+- **Empty state**: Chat model settings can refresh cloud models and prompts users to verify the endpoint if none are available.
 
 ### Agent Activities
 
@@ -154,6 +161,10 @@ The following APIs have been updated:
 - `AppManager` - App-wide settings and state
 - `LLMEvaluator` - LLM generation state and agent activities
 - `DeviceStat` - Hardware monitoring
+
+### Empty Chat State
+
+- Shows the current model name under the center icon with matching quaternary styling.
 
 ### View Modifiers
 
