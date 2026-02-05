@@ -74,7 +74,7 @@ class LLMEvaluator {
 
     /// parameters controlling the output
     let generateParameters = GenerateParameters(maxTokens: 4096, temperature: 0.5)
-    private let titleGenerateParameters = GenerateParameters(maxTokens: 32, temperature: 0.2)
+    private let titleGenerateParameters = GenerateParameters(maxTokens: 64, temperature: 0.2)
 
     /// update the display every N tokens -- 4 looks like it updates continuously
     /// and is low overhead.  observed ~15% reduction in tokens/s when updating
@@ -379,6 +379,7 @@ class LLMEvaluator {
     }
 
     func generateTitle(modelName: String, thread: Thread, systemPrompt: String) async -> String {
+        let fallback = lastUserMessageText(from: thread).flatMap(fallbackTitle(from:))
         do {
             let modelContainer = try await load(modelName: modelName)
             let promptHistory = await modelContainer.configuration.getPromptHistory(
@@ -405,9 +406,13 @@ class LLMEvaluator {
                 return outputText
             }
 
+            let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                return fallback ?? ""
+            }
             return result
         } catch {
-            return ""
+            return fallback ?? ""
         }
     }
 
@@ -418,41 +423,47 @@ class LLMEvaluator {
         apiBaseURL: String,
         apiKey: String
     ) async -> String {
-        do {
-            guard let baseURL = OpenAIClient.normalizedBaseURL(from: apiBaseURL) else {
-                return ""
-            }
+        let fallback = lastUserMessageText(from: thread).flatMap(fallbackTitle(from:))
 
-            let messages = makeOpenAIChatMessages(thread: thread, systemPrompt: systemPrompt)
-            let requestBody = OpenAIClient.ChatRequest(
-                model: modelName,
-                messages: messages,
-                temperature: Double(titleGenerateParameters.temperature),
-                maxTokens: titleGenerateParameters.maxTokens,
-                stream: false,
-                tools: nil,
-                toolChoice: nil
-            )
-            var request = try OpenAIClient.makeChatRequest(baseURL: baseURL, apiKey: apiKey, body: requestBody)
-            request.setValue("application/json", forHTTPHeaderField: "Accept")
-            request.setValue("en-US,en", forHTTPHeaderField: "Accept-Language")
-            request.timeoutInterval = 20
-            let (data, _) = try await requestChatResponseData(request: request)
-            let responseText = OpenAIClient.extractJSONTitle(from: data) ?? ""
-            let trimmed = responseText.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty {
-                if let lastUserMessage = lastUserMessageText(from: thread),
-                   let fallbackTitle = fallbackTitle(from: lastUserMessage) {
-                    return fallbackTitle
-                }
-                return ""
-            } else {
-                print("Title generation received \(trimmed.count) chars for model: \(modelName)")
-                return responseText
-            }
-        } catch {
-            return ""
+        guard let baseURL = OpenAIClient.normalizedBaseURL(from: apiBaseURL) else {
+            return fallback ?? ""
         }
+
+        let messages = makeOpenAIChatMessages(thread: thread, systemPrompt: systemPrompt)
+        let requestBody = OpenAIClient.ChatRequest(
+            model: modelName,
+            messages: messages,
+            temperature: Double(titleGenerateParameters.temperature),
+            maxTokens: titleGenerateParameters.maxTokens,
+            stream: false,
+            tools: nil,
+            toolChoice: nil
+        )
+
+        let maxAttempts = 2
+        for attempt in 1...maxAttempts {
+            do {
+                var request = try OpenAIClient.makeChatRequest(baseURL: baseURL, apiKey: apiKey, body: requestBody)
+                request.setValue("application/json", forHTTPHeaderField: "Accept")
+                request.setValue("en-US,en", forHTTPHeaderField: "Accept-Language")
+                request.timeoutInterval = 20
+
+                let (data, _) = try await requestChatResponseData(request: request)
+                let responseText = OpenAIClient.extractJSONTitle(from: data) ?? OpenAIClient.extractChatText(from: data)
+                let trimmed = responseText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    print("Title generation received \(trimmed.count) chars for model: \(modelName)")
+                    return responseText
+                }
+            } catch {
+                if attempt == maxAttempts {
+                    break
+                }
+                try? await Task.sleep(nanoseconds: 350_000_000)
+            }
+        }
+
+        return fallback ?? ""
     }
 
     private struct WebSearchToolArguments: Decodable {
@@ -709,30 +720,10 @@ class LLMEvaluator {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return nil }
 
-        let stopWords: Set<String> = [
-            "a", "an", "and", "are", "as", "at", "be", "but", "by",
-            "for", "from", "has", "have", "how", "if", "in", "into",
-            "is", "it", "its", "of", "on", "or", "that", "the",
-            "their", "to", "what", "which", "who", "will", "with",
-            "would", "should", "could", "can", "do", "does", "did",
-            "about", "over", "under", "up", "down", "out", "off",
-            "your", "you", "me", "my", "we", "our", "they", "them",
-            "this", "these", "those", "i"
-        ]
-
         let tokens = cleaned
             .split { $0.isWhitespace }
             .map(String.init)
-
-        let filtered = tokens.filter { token in
-            let stripped = token
-                .trimmingCharacters(in: CharacterSet.punctuationCharacters)
-                .lowercased()
-            return !stripped.isEmpty && !stopWords.contains(stripped)
-        }
-
-        let source = filtered.isEmpty ? tokens : filtered
-        let limited = source.prefix(8).joined(separator: " ")
+        let limited = tokens.prefix(8).joined(separator: " ")
         return limited.isEmpty ? nil : limited
     }
 

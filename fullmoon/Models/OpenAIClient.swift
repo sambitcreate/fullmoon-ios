@@ -138,6 +138,46 @@ struct OpenAIClient {
         }
     }
 
+    struct ContentPart: Decodable {
+        let type: String?
+        let text: String?
+    }
+
+    enum MessageContent: Decodable {
+        case text(String)
+        case parts([ContentPart])
+        case none
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            if container.decodeNil() {
+                self = .none
+                return
+            }
+            if let text = try? container.decode(String.self) {
+                self = .text(text)
+                return
+            }
+            if let parts = try? container.decode([ContentPart].self) {
+                self = .parts(parts)
+                return
+            }
+            self = .none
+        }
+
+        var flattenedText: String? {
+            switch self {
+            case let .text(value):
+                return value
+            case let .parts(parts):
+                let text = parts.compactMap(\.text).joined()
+                return text.isEmpty ? nil : text
+            case .none:
+                return nil
+            }
+        }
+    }
+
     struct ChatStreamChunk: Decodable {
         struct Choice: Decodable {
             struct Delta: Decodable {
@@ -159,9 +199,13 @@ struct OpenAIClient {
     struct ChatCompletionResponse: Decodable {
         struct Choice: Decodable {
             struct Message: Decodable {
-                let content: String?
+                let content: MessageContent?
                 let reasoningContent: String?
                 let toolCalls: [ToolCall]?
+
+                var contentText: String? {
+                    content?.flattenedText
+                }
 
                 enum CodingKeys: String, CodingKey {
                     case content
@@ -321,15 +365,18 @@ struct OpenAIClient {
         guard let decoded = try? JSONDecoder().decode(ChatCompletionResponse.self, from: data) else {
             return nil
         }
-        return decoded.choices.compactMap { $0.message?.content }.joined()
+        return decoded.choices.compactMap { $0.message?.contentText }.joined()
     }
 
     static func extractChatText(from data: Data) -> String {
         if let decoded = try? JSONDecoder().decode(ChatCompletionResponse.self, from: data) {
             let text = decoded.choices.compactMap { message in
-                message.message?.content?.isEmpty == false
-                    ? message.message?.content
-                    : message.message?.reasoningContent
+                let content = message.message?.contentText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if !content.isEmpty {
+                    return content
+                }
+                let reasoning = message.message?.reasoningContent?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                return reasoning.isEmpty ? nil : reasoning
             }.joined()
             if !text.isEmpty {
                 return text
@@ -356,32 +403,108 @@ struct OpenAIClient {
     }
 
     static func extractJSONTitle(from data: Data) -> String? {
-        func parseJSONTitle(from text: String) -> String? {
+        func cleanedTitle(_ text: String) -> String? {
+            var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            cleaned = cleaned.trimmingCharacters(in: CharacterSet(charactersIn: "\"'`“”‘’"))
+            cleaned = cleaned.replacingOccurrences(of: "\n", with: " ")
+            cleaned = cleaned.replacingOccurrences(of: "\r", with: " ")
+            cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+            return cleaned.isEmpty ? nil : cleaned
+        }
+
+        func parseJSONObjectTitle(from text: String) -> String? {
+            guard let data = text.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let title = object["title"] as? String else {
+                return nil
+            }
+            return cleanedTitle(title)
+        }
+
+        func parseEmbeddedJSONTitle(from text: String) -> String? {
             guard let start = text.firstIndex(of: "{"), let end = text.lastIndex(of: "}") else {
                 return nil
             }
             let slice = String(text[start...end])
-            guard let sliceData = slice.data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: sliceData) as? [String: Any],
-                  let title = object["title"] as? String else {
+            guard let title = parseJSONObjectTitle(from: slice) else {
                 return nil
             }
-            return title.trimmingCharacters(in: .whitespacesAndNewlines)
+            return title
+        }
+
+        func parseRegexTitle(from text: String) -> String? {
+            let pattern = "\"title\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])+)\""
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
+                return nil
+            }
+            let range = NSRange(location: 0, length: text.utf16.count)
+            guard let match = regex.firstMatch(in: text, options: [], range: range),
+                  match.numberOfRanges > 1,
+                  let titleRange = Range(match.range(at: 1), in: text) else {
+                return nil
+            }
+
+            let escaped = String(text[titleRange])
+            guard let wrapped = "\"\(escaped)\"".data(using: .utf8),
+                  let decoded = try? JSONDecoder().decode(String.self, from: wrapped) else {
+                return cleanedTitle(escaped)
+            }
+            return cleanedTitle(decoded)
+        }
+
+        func parseTitleFromText(_ text: String) -> String? {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+
+            if let title = parseJSONObjectTitle(from: trimmed) {
+                return title
+            }
+
+            let withoutFences = trimmed
+                .replacingOccurrences(of: "```json", with: "", options: [.caseInsensitive])
+                .replacingOccurrences(of: "```", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if let title = parseJSONObjectTitle(from: withoutFences) {
+                return title
+            }
+
+            if let title = parseEmbeddedJSONTitle(from: trimmed) {
+                return title
+            }
+
+            if let title = parseRegexTitle(from: trimmed) {
+                return title
+            }
+
+            let lines = trimmed
+                .components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            if let firstLine = lines.first, !firstLine.contains("{"), !firstLine.contains("}") {
+                return cleanedTitle(firstLine)
+            }
+
+            return nil
         }
 
         guard let decoded = try? JSONDecoder().decode(ChatCompletionResponse.self, from: data) else {
+            if let raw = String(data: data, encoding: .utf8) {
+                return parseTitleFromText(raw)
+            }
             return nil
         }
 
         for choice in decoded.choices {
-            if let content = choice.message?.content, let title = parseJSONTitle(from: content), !title.isEmpty {
+            if let content = choice.message?.contentText,
+               let title = parseTitleFromText(content),
+               !title.isEmpty {
                 return title
             }
         }
 
         for choice in decoded.choices {
             if let reasoning = choice.message?.reasoningContent,
-               let title = parseJSONTitle(from: reasoning),
+               let title = parseTitleFromText(reasoning),
                !title.isEmpty {
                 return title
             }

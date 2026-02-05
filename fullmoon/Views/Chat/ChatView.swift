@@ -185,10 +185,10 @@ struct ChatView: View {
 
     private var titleSystemPrompt: String {
         """
-        Return ONLY valid JSON. No markdown, no prose.
+        Return exactly one JSON object. No markdown and no explanation.
         Schema: {"title":"string"}
-        Title must be 6 to 8 words, one line, no punctuation at the end.
-        If unsure, still output a best-effort title.
+        Title should be 3 to 8 words, one line, no trailing punctuation.
+        If unsure, still return your best title.
         """
     }
 
@@ -371,6 +371,12 @@ struct ChatView: View {
         guard existingTitle.isEmpty else { return }
 
         let threadID = thread.id
+        let fallback = fallbackTitle(for: thread)
+        if let fallback, !fallback.isEmpty {
+            thread.title = fallback
+            try? modelContext.save()
+        }
+
         Task {
             let rawTitle: String
             switch appManager.currentModelSource {
@@ -388,13 +394,33 @@ struct ChatView: View {
                 )
             }
 
-            guard let normalizedTitle = normalizeTitle(rawTitle) else { return }
+            guard let normalizedTitle = normalizeTitle(rawTitle), isMeaningfulGeneratedTitle(normalizedTitle) else { return }
             await MainActor.run {
                 guard thread.id == threadID else { return }
+                let currentTitle = thread.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let shouldReplace =
+                    currentTitle.isEmpty ||
+                    (fallback?.caseInsensitiveCompare(currentTitle) == .orderedSame) ||
+                    !isMeaningfulGeneratedTitle(currentTitle)
+                guard shouldReplace else { return }
                 thread.title = normalizedTitle
                 try? modelContext.save()
             }
         }
+    }
+
+    private func fallbackTitle(for thread: Thread) -> String? {
+        guard let firstUserMessage = thread.sortedMessages.first(where: { $0.role == .user })?.content else {
+            return nil
+        }
+        let cleaned = firstUserMessage
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return nil }
+        let words = cleaned.split { $0.isWhitespace }.map(String.init)
+        guard !words.isEmpty else { return nil }
+        return words.prefix(8).joined(separator: " ")
     }
 
     private func normalizeTitle(_ raw: String) -> String? {
@@ -417,6 +443,46 @@ struct ChatView: View {
         guard !words.isEmpty else { return nil }
         let limited = words.prefix(8).joined(separator: " ")
         return limited.isEmpty ? nil : limited
+    }
+
+    private func isMeaningfulGeneratedTitle(_ title: String) -> Bool {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+
+        let lower = trimmed.lowercased()
+        let disallowed = ["chat", "new chat", "conversation", "untitled", "title"]
+        if disallowed.contains(lower) {
+            return false
+        }
+
+        let disallowedPrefixes = [
+            "the user",
+            "user is",
+            "user wants",
+            "i should",
+            "i need to",
+            "assistant",
+            "as an ai",
+            "the prompt"
+        ]
+        if disallowedPrefixes.contains(where: { lower.hasPrefix($0) }) {
+            return false
+        }
+
+        let disallowedFragments = [
+            " asking me ",
+            " asked me ",
+            " wants me to ",
+            " request is ",
+            " this request ",
+            " me for an opinion "
+        ]
+        if disallowedFragments.contains(where: { lower.contains($0) }) {
+            return false
+        }
+
+        let words = trimmed.split { $0.isWhitespace }
+        return !words.isEmpty
     }
 
     private func extractJSONTitle(from raw: String) -> String? {
