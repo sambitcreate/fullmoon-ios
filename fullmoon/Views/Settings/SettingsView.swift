@@ -32,7 +32,7 @@ struct SettingsView: View {
                         } icon: {
                             Image(systemName: "arrow.down.circle")
                         }
-                        .badge(appManager.modelDisplayName(appManager.currentModelName ?? ""))
+                        .badge(appManager.currentModelDisplayName)
                     }
                 }
 

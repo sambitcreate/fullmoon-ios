@@ -8,6 +8,11 @@
 import SwiftUI
 import SwiftData
 
+enum ModelSource: String, Codable, CaseIterable {
+    case local
+    case cloud
+}
+
 class AppManager: ObservableObject {
     @AppStorage("systemPrompt") var systemPrompt = "you are a helpful assistant"
     @AppStorage("appTintColor") var appTintColor: AppTintColor = .monochrome
@@ -15,6 +20,10 @@ class AppManager: ObservableObject {
     @AppStorage("appFontSize") var appFontSize: AppFontSize = .medium
     @AppStorage("appFontWidth") var appFontWidth: AppFontWidth = .standard
     @AppStorage("currentModelName") var currentModelName: String?
+    @AppStorage("currentCloudModelName") var currentCloudModelName: String?
+    @AppStorage("cloudAPIBaseURL") var cloudAPIBaseURL: String = ""
+    @AppStorage("cloudAPIKey") var cloudAPIKey: String = ""
+    @AppStorage("currentModelSource") private var currentModelSourceRaw = ModelSource.local.rawValue
     @AppStorage("shouldPlayHaptics") var shouldPlayHaptics = true
     @AppStorage("numberOfVisits") var numberOfVisits = 0
     @AppStorage("numberOfVisitsOfLastRequest") var numberOfVisitsOfLastRequest = 0
@@ -42,15 +51,45 @@ class AppManager: ObservableObject {
     }
         
     private let installedModelsKey = "installedModels"
+    private let cloudModelsKey = "cloudModels"
         
     @Published var installedModels: [String] = [] {
         didSet {
             saveInstalledModelsToUserDefaults()
         }
     }
+
+    @Published var cloudModels: [String] = [] {
+        didSet {
+            saveCloudModelsToUserDefaults()
+        }
+    }
+
+    var currentModelSource: ModelSource {
+        get { ModelSource(rawValue: currentModelSourceRaw) ?? .local }
+        set { currentModelSourceRaw = newValue.rawValue }
+    }
+
+    var hasCloudModels: Bool {
+        !cloudModels.isEmpty
+    }
+
+    var hasAnyModels: Bool {
+        !installedModels.isEmpty || !cloudModels.isEmpty
+    }
+
+    var currentModelDisplayName: String {
+        switch currentModelSource {
+        case .local:
+            return modelDisplayName(currentModelName ?? "")
+        case .cloud:
+            return currentCloudModelName ?? ""
+        }
+    }
     
     init() {
         loadInstalledModelsFromUserDefaults()
+        loadCloudModelsFromUserDefaults()
     }
     
     func incrementNumberOfVisits() {
@@ -74,6 +113,21 @@ class AppManager: ObservableObject {
             self.installedModels = [] // Default to an empty array if there's no data
         }
     }
+
+    private func saveCloudModelsToUserDefaults() {
+        if let jsonData = try? JSONEncoder().encode(cloudModels) {
+            UserDefaults.standard.set(jsonData, forKey: cloudModelsKey)
+        }
+    }
+
+    private func loadCloudModelsFromUserDefaults() {
+        if let jsonData = UserDefaults.standard.data(forKey: cloudModelsKey),
+           let decodedArray = try? JSONDecoder().decode([String].self, from: jsonData) {
+            self.cloudModels = decodedArray
+        } else {
+            self.cloudModels = []
+        }
+    }
     
     func playHaptic() {
         if shouldPlayHaptics {
@@ -88,6 +142,23 @@ class AppManager: ObservableObject {
         if !installedModels.contains(model) {
             installedModels.append(model)
         }
+    }
+
+    func addCloudModel(_ model: String) {
+        let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedModel.isEmpty else { return }
+        if !cloudModels.contains(trimmedModel) {
+            cloudModels.append(trimmedModel)
+            cloudModels.sort()
+        }
+    }
+
+    func mergeCloudModels(_ models: [String]) {
+        let cleaned = models
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let merged = Set(cloudModels).union(cleaned)
+        cloudModels = merged.sorted()
     }
     
     func modelDisplayName(_ modelName: String) -> String {

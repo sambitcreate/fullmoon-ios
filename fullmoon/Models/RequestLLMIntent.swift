@@ -50,7 +50,12 @@ struct RequestLLMIntent: AppIntent {
             }
         }
 
-        if let modelName = appManager.currentModelName {
+        switch appManager.currentModelSource {
+        case .local:
+            guard let modelName = appManager.currentModelName else {
+                let error = "no local model is currently selected. open the app and select a model first."
+                return .result(value: error, dialog: "\(error)")
+            }
             _ = try? await llm.load(modelName: modelName)
 
             let message = Message(role: .user, content: prompt, thread: thread)
@@ -69,16 +74,45 @@ struct RequestLLMIntent: AppIntent {
             if continuous {
                 throw $prompt.needsValueError("\(output)")
             }
-            
+
             if continuous {
                 return .result(value: output, dialog: "continue chatting in the app")
             }
-            
+
             return .result(value: output, dialog: "\(output)")
-        }
-        else {
-            let error = "no model is currently selected. open the app and select a model first."
-            return .result(value: error, dialog: "\(error)")
+        case .cloud:
+            guard let modelName = appManager.currentCloudModelName else {
+                let error = "no cloud model is currently selected. open the app and select a model first."
+                return .result(value: error, dialog: "\(error)")
+            }
+
+            let message = Message(role: .user, content: prompt, thread: thread)
+            thread.messages.append(message)
+            var output = await llm.generateCloud(
+                modelName: modelName,
+                thread: thread,
+                systemPrompt: appManager.systemPrompt + systemPrompt,
+                apiBaseURL: appManager.cloudAPIBaseURL,
+                apiKey: appManager.cloudAPIKey
+            )
+
+            let maxCharacters = maxCharacters ?? .max
+            if output.count > maxCharacters {
+                output = String(output.prefix(maxCharacters)).trimmingCharacters(in: .whitespaces) + "..."
+            }
+
+            let responseMessage = Message(role: .assistant, content: output, thread: thread)
+            thread.messages.append(responseMessage)
+
+            if continuous {
+                throw $prompt.needsValueError("\(output)")
+            }
+
+            if continuous {
+                return .result(value: output, dialog: "continue chatting in the app")
+            }
+
+            return .result(value: output, dialog: "\(output)")
         }
     }
 

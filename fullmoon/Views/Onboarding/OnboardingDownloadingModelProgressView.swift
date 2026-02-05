@@ -102,6 +102,7 @@ struct OnboardingDownloadingModelProgressView: View {
         if installed {
             print("added installed model")
             appManager.currentModelName = selectedModel.name
+            appManager.currentModelSource = .local
             appManager.addInstalledModel(selectedModel.name)
         }
     }

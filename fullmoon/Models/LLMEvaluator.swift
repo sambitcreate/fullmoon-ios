@@ -5,6 +5,7 @@
 //  Created by Jordan Singer on 10/4/24.
 //
 
+import Foundation
 import MLX
 import MLXLLM
 import MLXLMCommon
@@ -39,6 +40,7 @@ class LLMEvaluator {
     private var startTime: Date?
 
     var modelConfiguration = ModelConfiguration.defaultModel
+    private var cloudRequestTask: URLSessionTask?
 
     func switchModel(_ model: ModelConfiguration) async {
         progress = 0.0 // reset progress
@@ -95,6 +97,8 @@ class LLMEvaluator {
     func stop() {
         isThinking = false
         cancelled = true
+        cloudRequestTask?.cancel()
+        cloudRequestTask = nil
     }
 
     func generate(modelName: String, thread: Thread, systemPrompt: String) async -> String {
@@ -164,5 +168,111 @@ class LLMEvaluator {
 
         running = false
         return output
+    }
+
+    func generateCloud(modelName: String, thread: Thread, systemPrompt: String, apiBaseURL: String, apiKey: String) async -> String {
+        guard !running else { return "" }
+
+        running = true
+        cancelled = false
+        output = ""
+        stat = ""
+        startTime = Date()
+        isThinking = false
+        thinkingTime = nil
+
+        defer {
+            running = false
+            cloudRequestTask = nil
+        }
+
+        do {
+            guard let baseURL = OpenAIClient.normalizedBaseURL(from: apiBaseURL) else {
+                output = "Missing or invalid API base URL."
+                return output
+            }
+
+            let messages = makeOpenAIChatMessages(thread: thread, systemPrompt: systemPrompt)
+            let requestBody = OpenAIClient.ChatRequest(
+                model: modelName,
+                messages: messages,
+                temperature: Double(generateParameters.temperature),
+                maxTokens: generateParameters.maxTokens,
+                stream: true
+            )
+            let request = try OpenAIClient.makeChatRequest(baseURL: baseURL, apiKey: apiKey, body: requestBody)
+
+            let (bytes, response) = try await URLSession.shared.bytes(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw OpenAIClientError.invalidResponse
+            }
+            cloudRequestTask = bytes.task
+
+            guard (200..<300).contains(httpResponse.statusCode) else {
+                var body = ""
+                for try await line in bytes.lines {
+                    body += line
+                }
+                throw OpenAIClientError.serverError(status: httpResponse.statusCode, body: body)
+            }
+
+            var outputText = ""
+            var chunkCount = 0
+            var rawResponse = ""
+
+            streamLoop: for try await line in bytes.lines {
+                if cancelled {
+                    break streamLoop
+                }
+
+                if let event = try OpenAIClient.parseStreamLine(line) {
+                    switch event {
+                    case .done:
+                        break streamLoop
+                    case let .delta(text):
+                        outputText += text
+                        chunkCount += 1
+                        if chunkCount % displayEveryNTokens == 0 {
+                            output = outputText
+                        }
+                    }
+                } else {
+                    let trimmed = String(line).trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        rawResponse += trimmed
+                    }
+                }
+            }
+
+            if outputText.isEmpty, let data = rawResponse.data(using: .utf8) {
+                if let fallback = OpenAIClient.extractChatCompletionContent(from: data) {
+                    outputText = fallback
+                }
+            }
+
+            if outputText != output {
+                output = outputText
+            }
+            thinkingTime = elapsedTime
+
+        } catch {
+            output = "Failed: \(error.localizedDescription)"
+        }
+
+        return output
+    }
+
+    private func makeOpenAIChatMessages(thread: Thread, systemPrompt: String) -> [OpenAIClient.ChatMessage] {
+        var messages: [OpenAIClient.ChatMessage] = []
+        let trimmedSystemPrompt = systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedSystemPrompt.isEmpty {
+            messages.append(.init(role: Role.system.rawValue, content: trimmedSystemPrompt))
+        }
+
+        for message in thread.sortedMessages {
+            messages.append(.init(role: message.role.rawValue, content: message.content))
+        }
+
+        return messages
     }
 }

@@ -283,8 +283,29 @@ struct ChatView: View {
                     appManager.playHaptic()
                     sendMessage(Message(role: .user, content: message, thread: currentThread))
                     isPromptFocused = true
-                    if let modelName = appManager.currentModelName {
+                    switch appManager.currentModelSource {
+                    case .local:
+                        guard let modelName = appManager.currentModelName else {
+                            sendMessage(Message(role: .assistant, content: "No local model selected. Choose a model in settings.", thread: currentThread))
+                            generatingThreadID = nil
+                            return
+                        }
                         let output = await llm.generate(modelName: modelName, thread: currentThread, systemPrompt: appManager.systemPrompt)
+                        sendMessage(Message(role: .assistant, content: output, thread: currentThread, generatingTime: llm.thinkingTime))
+                        generatingThreadID = nil
+                    case .cloud:
+                        guard let modelName = appManager.currentCloudModelName else {
+                            sendMessage(Message(role: .assistant, content: "No cloud model selected. Choose a model in settings.", thread: currentThread))
+                            generatingThreadID = nil
+                            return
+                        }
+                        let output = await llm.generateCloud(
+                            modelName: modelName,
+                            thread: currentThread,
+                            systemPrompt: appManager.systemPrompt,
+                            apiBaseURL: appManager.cloudAPIBaseURL,
+                            apiKey: appManager.cloudAPIKey
+                        )
                         sendMessage(Message(role: .assistant, content: output, thread: currentThread, generatingTime: llm.thinkingTime))
                         generatingThreadID = nil
                     }

@@ -38,12 +38,12 @@ struct ContentView: View {
         .environmentObject(appManager)
         .environment(llm)
         .task {
-            if appManager.installedModels.count == 0 {
+            if !appManager.hasAnyModels {
                 showOnboarding.toggle()
             } else {
                 isPromptFocused = true
                 // load the model
-                if let modelName = appManager.currentModelName {
+                if appManager.currentModelSource == .local, let modelName = appManager.currentModelName {
                     _ = try? await llm.load(modelName: modelName)
                 }
             }
