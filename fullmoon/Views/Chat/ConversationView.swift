@@ -350,6 +350,10 @@ struct ConversationView: View {
     @State private var lastScrollTime: Date = .distantPast
     @State private var lastCompletedMessageID: UUID?
 
+    private var shouldHideStreamingOutput: Bool {
+        !appManager.thinkingModeEnabled && !appManager.webSearchEnabled
+    }
+
     var body: some View {
         ScrollViewReader { scrollView in
             ScrollView(.vertical) {
@@ -370,7 +374,20 @@ struct ConversationView: View {
                     if llm.running && thread.id == generatingThreadID {
                         VStack(alignment: .leading, spacing: 12) {
                             // Show output based on whether we're finalizing
-                            if llm.isFinalizingAnswer {
+                            if shouldHideStreamingOutput {
+                                // Hide streaming output; show only the thinking indicator
+                                HStack(spacing: 8) {
+                                    Circle()
+                                        .fill(.secondary)
+                                        .frame(width: 6, height: 6)
+                                    Text("thinking...")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                        .italic()
+                                }
+                                .padding(.horizontal)
+                                .opacity(0.7)
+                            } else if llm.isFinalizingAnswer {
                                 // Hide streaming, show fade-in animation with 0.5s initial delay
                                 if !llm.output.isEmpty {
                                     DelayedSequentialFadeInMessageView(
@@ -424,8 +441,8 @@ struct ConversationView: View {
             }
             .scrollPosition(id: $scrollID, anchor: .bottom)
             .onChange(of: llm.output) { _, _ in
-                // Don't auto-scroll when finalizing answer (user should see top first)
-                if !llm.isFinalizingAnswer {
+                // Don't auto-scroll when finalizing answer or when streaming is hidden
+                if !llm.isFinalizingAnswer && !shouldHideStreamingOutput {
                     // Throttle scroll updates to every 100ms
                     let now = Date()
                     if !scrollInterrupted && now.timeIntervalSince(lastScrollTime) > 0.1 {
@@ -462,6 +479,13 @@ struct ConversationView: View {
                     // Generation just finished - mark the last message for fade-in animation
                     if let lastMessage = thread.sortedMessages.last, lastMessage.role == .assistant {
                         lastCompletedMessageID = lastMessage.id
+                        if shouldHideStreamingOutput {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                withAnimation(.easeInOut(duration: 0.3)) {
+                                    scrollView.scrollTo(lastMessage.id.uuidString, anchor: .top)
+                                }
+                            }
+                        }
                     }
                 }
             }

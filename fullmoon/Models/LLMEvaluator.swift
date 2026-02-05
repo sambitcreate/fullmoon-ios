@@ -429,12 +429,14 @@ class LLMEvaluator {
                 messages: messages,
                 temperature: Double(titleGenerateParameters.temperature),
                 maxTokens: titleGenerateParameters.maxTokens,
-                stream: true,
+                stream: false,
                 tools: nil,
                 toolChoice: nil
             )
-            let request = try OpenAIClient.makeChatRequest(baseURL: baseURL, apiKey: apiKey, body: requestBody)
-            return try await streamChatResponseText(request: request)
+            var request = try OpenAIClient.makeChatRequest(baseURL: baseURL, apiKey: apiKey, body: requestBody)
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.timeoutInterval = 20
+            return try await requestChatResponseText(request: request)
         } catch {
             return ""
         }
@@ -663,6 +665,24 @@ class LLMEvaluator {
         }
 
         return outputText
+    }
+
+    private func requestChatResponseText(request: URLRequest) async throws -> String {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw OpenAIClientError.invalidResponse
+        }
+
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            throw OpenAIClientError.serverError(status: httpResponse.statusCode, body: body)
+        }
+
+        guard let decoded = try? JSONDecoder().decode(OpenAIClient.ChatCompletionResponse.self, from: data) else {
+            return ""
+        }
+
+        return decoded.choices.compactMap { $0.message?.content }.joined()
     }
 
     private struct ToolCallResult {

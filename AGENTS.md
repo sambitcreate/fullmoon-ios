@@ -102,6 +102,7 @@ Dependencies are managed through Xcode's SPM integration (no Package.swift file 
   - `GET {baseURL}/models`
   - `POST {baseURL}/chat/completions` with `stream: true`
 - **Model list**: Users can fetch models from the endpoint or add custom model IDs manually.
+- **Chat titles**: A short title is generated in parallel using the current model. It uses a non-streaming request (cloud) or a lightweight local generation pass. Result is stored in `Thread.title` and shown in the chat list and nav title when present.
 
 ### Search (Exa)
 
