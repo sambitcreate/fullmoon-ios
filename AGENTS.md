@@ -4,7 +4,7 @@ This file contains instructions for AI agents working with the fullmoon iOS proj
 
 ## Project Overview
 
-Fullmoon is an iOS/macOS application that runs on-device Large Language Models (LLMs) using Apple's MLX framework. It provides a chat interface for interacting with models like Llama 3.2 and Qwen 3.
+Fullmoon is an iOS/macOS application that runs on-device Large Language Models (LLMs) using Apple's MLX framework, and can also chat with OpenAI-compatible cloud endpoints. It provides a chat interface for interacting with models like Llama 3.2 and Qwen 3, plus custom cloud models.
 
 ## Build Commands
 
@@ -50,6 +50,7 @@ fullmoon-ios/
 │   │   ├── Data.swift                # AppManager, Message, Thread, enums
 │   │   ├── LLMEvaluator.swift        # LLM generation and evaluation logic
 │   │   ├── DeviceStat.swift          # GPU/memory usage tracking
+│   │   ├── OpenAIClient.swift         # OpenAI-compatible API client (models + chat)
 │   │   ├── Models.swift              # Model configurations and registry
 │   │   └── RequestLLMIntent.swift     # App Intents integration
 │   ├── Views/                         # SwiftUI views
@@ -70,6 +71,7 @@ The project uses Swift Package Manager with these key dependencies:
 - **MLXLMCommon** - Common LLM API
 - **SwiftData** - Persistence layer
 - **MarkdownUI** - Markdown rendering
+- **OpenAI-compatible APIs** - Cloud model listing and chat streaming
 
 Dependencies are managed through Xcode's SPM integration (no Package.swift file at root).
 
@@ -88,6 +90,14 @@ Dependencies are managed through Xcode's SPM integration (no Package.swift file 
 - **Physical device required**: MLX requires Metal GPU and does not work in iOS Simulator
 - **Memory management**: The app uses `Memory.cacheLimit` and `Memory.activeMemory` for GPU memory management
 - **AsyncStream generation**: Text generation uses AsyncStream-based API for token streaming
+
+### Cloud Models (OpenAI-Compatible)
+
+- **Model source**: `AppManager.currentModelSource` switches between `local` and `cloud`.
+- **Endpoint config**: Base URL is used exactly as entered (no automatic `/v1` append). The app calls:
+  - `GET {baseURL}/models`
+  - `POST {baseURL}/chat/completions` with `stream: true`
+- **Model list**: Users can fetch models from the endpoint or add custom model IDs manually.
 
 ### SwiftData Models
 
@@ -150,6 +160,7 @@ Use `appManager.userInterfaceIdiom` for UI adaptation:
 - Model loading fails - Check available memory and disk space
 - Generation stops unexpectedly - Check `LLMEvaluator.cancelled` state and memory limits
 - App crashes on simulator - MLX doesn't work in simulator, use physical device
+- Cloud model fetch 404s - Verify your base URL path (no automatic `/v1`). Include the correct version path in settings if required by the provider.
 
 ## Code Style
 
