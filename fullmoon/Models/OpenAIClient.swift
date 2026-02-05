@@ -38,7 +38,84 @@ struct OpenAIClient {
 
     struct ChatMessage: Codable {
         let role: String
-        let content: String
+        let content: String?
+        let toolCalls: [ToolCall]?
+        let toolCallId: String?
+
+        init(role: String, content: String?, toolCalls: [ToolCall]? = nil, toolCallId: String? = nil) {
+            self.role = role
+            self.content = content
+            self.toolCalls = toolCalls
+            self.toolCallId = toolCallId
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case role
+            case content
+            case toolCalls = "tool_calls"
+            case toolCallId = "tool_call_id"
+        }
+    }
+
+    struct Tool: Encodable {
+        let type: String
+        let function: ToolFunction
+
+        init(function: ToolFunction) {
+            self.type = "function"
+            self.function = function
+        }
+    }
+
+    struct ToolFunction: Encodable {
+        let name: String
+        let description: String?
+        let parameters: JSONSchema
+    }
+
+    struct JSONSchema: Encodable {
+        let type: String
+        let properties: [String: JSONSchemaProperty]
+        let required: [String]?
+    }
+
+    struct JSONSchemaProperty: Encodable {
+        let type: String
+        let description: String?
+        let enumValues: [String]?
+        let minimum: Int?
+        let maximum: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case type
+            case description
+            case enumValues = "enum"
+            case minimum
+            case maximum
+        }
+    }
+
+    struct ToolCall: Codable {
+        let id: String?
+        let type: String?
+        let function: ToolCallFunction
+    }
+
+    struct ToolCallFunction: Codable {
+        let name: String
+        let arguments: String
+    }
+
+    struct ToolCallDelta: Decodable {
+        let index: Int?
+        let id: String?
+        let type: String?
+        let function: ToolCallFunctionDelta?
+    }
+
+    struct ToolCallFunctionDelta: Decodable {
+        let name: String?
+        let arguments: String?
     }
 
     struct ChatRequest: Encodable {
@@ -47,12 +124,16 @@ struct OpenAIClient {
         let temperature: Double?
         let maxTokens: Int?
         let stream: Bool
+        let tools: [Tool]?
+        let toolChoice: String?
 
         enum CodingKeys: String, CodingKey {
             case model
             case messages
             case temperature
             case stream
+            case tools
+            case toolChoice = "tool_choice"
             case maxTokens = "max_tokens"
         }
     }
@@ -61,6 +142,12 @@ struct OpenAIClient {
         struct Choice: Decodable {
             struct Delta: Decodable {
                 let content: String?
+                let toolCalls: [ToolCallDelta]?
+
+                enum CodingKeys: String, CodingKey {
+                    case content
+                    case toolCalls = "tool_calls"
+                }
             }
 
             let delta: Delta?
@@ -73,6 +160,12 @@ struct OpenAIClient {
         struct Choice: Decodable {
             struct Message: Decodable {
                 let content: String?
+                let toolCalls: [ToolCall]?
+
+                enum CodingKeys: String, CodingKey {
+                    case content
+                    case toolCalls = "tool_calls"
+                }
             }
 
             let message: Message?
@@ -83,7 +176,50 @@ struct OpenAIClient {
 
     enum StreamEvent {
         case delta(String)
+        case toolCallDelta(ToolCallDelta)
         case done
+    }
+
+    struct ToolCallAccumulator {
+        struct Partial {
+            var id: String?
+            var type: String?
+            var name: String?
+            var arguments: String = ""
+        }
+
+        private var store: [Int: Partial] = [:]
+
+        mutating func append(_ delta: ToolCallDelta) {
+            let index = delta.index ?? 0
+            var partial = store[index] ?? Partial()
+            if let id = delta.id {
+                partial.id = id
+            }
+            if let type = delta.type {
+                partial.type = type
+            }
+            if let name = delta.function?.name {
+                partial.name = name
+            }
+            if let args = delta.function?.arguments {
+                partial.arguments += args
+            }
+            store[index] = partial
+        }
+
+        func buildToolCalls() -> [ToolCall] {
+            store
+                .sorted { $0.key < $1.key }
+                .compactMap { _, partial in
+                    guard let name = partial.name else { return nil }
+                    return ToolCall(
+                        id: partial.id,
+                        type: partial.type,
+                        function: ToolCallFunction(name: name, arguments: partial.arguments)
+                    )
+                }
+        }
     }
 
     private struct APIErrorResponse: Decodable {
@@ -141,18 +277,28 @@ struct OpenAIClient {
         return request
     }
 
-    static func parseStreamLine(_ line: String) throws -> StreamEvent? {
+    static func parseStreamLine(_ line: String) throws -> [StreamEvent] {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.hasPrefix("data:") else { return nil }
+        guard trimmed.hasPrefix("data:") else { return [] }
         let payload = String(trimmed.dropFirst("data:".count)).trimmingCharacters(in: .whitespaces)
         if payload == "[DONE]" {
-            return .done
+            return [.done]
         }
-        guard let data = payload.data(using: .utf8) else { return nil }
+        guard let data = payload.data(using: .utf8) else { return [] }
         let chunk = try JSONDecoder().decode(ChatStreamChunk.self, from: data)
-        let delta = chunk.choices.compactMap { $0.delta?.content }.joined()
-        guard !delta.isEmpty else { return nil }
-        return .delta(delta)
+        var events: [StreamEvent] = []
+        let deltaText = chunk.choices.compactMap { $0.delta?.content }.joined()
+        if !deltaText.isEmpty {
+            events.append(.delta(deltaText))
+        }
+        for choice in chunk.choices {
+            if let toolCalls = choice.delta?.toolCalls {
+                for toolCall in toolCalls {
+                    events.append(.toolCallDelta(toolCall))
+                }
+            }
+        }
+        return events
     }
 
     static func applyAuthHeader(_ apiKey: String?, to request: inout URLRequest) {
@@ -174,5 +320,13 @@ struct OpenAIClient {
             return nil
         }
         return decoded.choices.compactMap { $0.message?.content }.joined()
+    }
+
+    static func extractChatCompletionToolCalls(from data: Data) -> [ToolCall]? {
+        guard let decoded = try? JSONDecoder().decode(ChatCompletionResponse.self, from: data) else {
+            return nil
+        }
+        let toolCalls = decoded.choices.compactMap { $0.message?.toolCalls }.flatMap { $0 }
+        return toolCalls.isEmpty ? nil : toolCalls
     }
 }

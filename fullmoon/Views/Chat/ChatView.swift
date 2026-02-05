@@ -304,7 +304,9 @@ struct ChatView: View {
                             thread: currentThread,
                             systemPrompt: appManager.systemPrompt,
                             apiBaseURL: appManager.cloudAPIBaseURL,
-                            apiKey: appManager.cloudAPIKey
+                            apiKey: appManager.cloudAPIKey,
+                            webSearchEnabled: appManager.webSearchEnabled,
+                            exaAPIKey: appManager.exaAPIKey
                         )
                         sendMessage(Message(role: .assistant, content: output, thread: currentThread, generatingTime: llm.thinkingTime))
                         generatingThreadID = nil

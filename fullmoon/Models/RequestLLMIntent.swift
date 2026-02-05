@@ -93,7 +93,9 @@ struct RequestLLMIntent: AppIntent {
                 thread: thread,
                 systemPrompt: appManager.systemPrompt + systemPrompt,
                 apiBaseURL: appManager.cloudAPIBaseURL,
-                apiKey: appManager.cloudAPIKey
+                apiKey: appManager.cloudAPIKey,
+                webSearchEnabled: appManager.webSearchEnabled,
+                exaAPIKey: appManager.exaAPIKey
             )
 
             let maxCharacters = maxCharacters ?? .max

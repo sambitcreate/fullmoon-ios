@@ -23,6 +23,8 @@ class AppManager: ObservableObject {
     @AppStorage("currentCloudModelName") var currentCloudModelName: String?
     @AppStorage("cloudAPIBaseURL") var cloudAPIBaseURL: String = ""
     @AppStorage("cloudAPIKey") var cloudAPIKey: String = ""
+    @AppStorage("webSearchEnabled") var webSearchEnabled = false
+    @AppStorage("exaAPIKey") var exaAPIKey: String = ""
     @AppStorage("currentModelSource") private var currentModelSourceRaw = ModelSource.local.rawValue
     @AppStorage("shouldPlayHaptics") var shouldPlayHaptics = true
     @AppStorage("numberOfVisits") var numberOfVisits = 0

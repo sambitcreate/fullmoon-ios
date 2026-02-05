@@ -34,6 +34,10 @@ struct SettingsView: View {
                         }
                         .badge(appManager.currentModelDisplayName)
                     }
+
+                    NavigationLink(destination: WebSearchSettingsView()) {
+                        Label("web search", systemImage: "globe")
+                    }
                 }
 
                 Section {
