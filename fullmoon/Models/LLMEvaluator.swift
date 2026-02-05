@@ -819,6 +819,17 @@ class LLMEvaluator {
         let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
 
+        // Reject ellipsis or placeholder-only titles
+        let strippedPunctuation = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?…·-–—"))
+        if strippedPunctuation.isEmpty {
+            return false
+        }
+
+        // Reject titles that are too short (need at least 2 meaningful characters)
+        if trimmed.count < 3 {
+            return false
+        }
+
         let lower = trimmed.lowercased()
 
         let exactDisallowed: Set<String> = [

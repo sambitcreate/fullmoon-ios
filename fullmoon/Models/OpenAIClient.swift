@@ -501,10 +501,22 @@ struct OpenAIClient {
         }
 
         func isReasoningInTitle(_ text: String) -> Bool {
-            let lower = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let lower = trimmed.lowercased()
+
+            // Reject ellipsis or placeholder-only titles like "..."
+            let strippedPunctuation = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?…·-–—"))
+            if strippedPunctuation.isEmpty {
+                return true
+            }
+
+            // Reject titles that are too short
+            if trimmed.count < 3 {
+                return true
+            }
 
             // Reject if too long (titles should be short)
-            if text.count > 80 {
+            if trimmed.count > 80 {
                 return true
             }
 
@@ -710,6 +722,41 @@ struct OpenAIClient {
                     continue
                 }
                 return cleaned
+            }
+
+            // Try to extract a title from common patterns in reasoning output
+            if let extracted = extractTitleFromReasoning(trimmed) {
+                return extracted
+            }
+
+            return nil
+        }
+
+        // Try to extract actual title from model reasoning output
+        func extractTitleFromReasoning(_ text: String) -> String? {
+            let lower = text.lowercased()
+
+            // Look for patterns like "Title: Best Characters" or "**Title:** Best Characters"
+            let titlePatterns = [
+                #"\*\*[Tt]itle:?\*\*\s*[\"']?([^\"'\n]+)[\"']?"#,
+                #"[Tt]itle:\s*[\"']?([^\"'\n]+)[\"']?"#,
+                #"[Ss]uggested [Tt]itle:\s*[\"']?([^\"'\n]+)[\"']?"#,
+                #"[Ff]inal [Tt]itle:\s*[\"']?([^\"'\n]+)[\"']?"#,
+                #"[Gg]enerated [Tt]itle:\s*[\"']?([^\"'\n]+)[\"']?"#
+            ]
+
+            for pattern in titlePatterns {
+                if let regex = try? NSRegularExpression(pattern: pattern, options: []),
+                   let match = regex.firstMatch(in: text, options: [], range: NSRange(location: 0, length: text.utf16.count)),
+                   match.numberOfRanges > 1,
+                   let titleRange = Range(match.range(at: 1), in: text) {
+                    let candidate = String(text[titleRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    if let cleaned = cleanedTitle(candidate),
+                       !isPlaceholderTitle(cleaned),
+                       !isReasoningInTitle(cleaned) {
+                        return cleaned
+                    }
+                }
             }
 
             return nil

@@ -106,4 +106,34 @@ struct TitleParsingTests {
         let title = OpenAIClient.extractJSONTitle(from: data)
         #expect(title == nil)
     }
+
+    @Test
+    func extractJSONTitleRejectsEllipsis() {
+        let json = """
+        {"choices":[{"message":{"content":"{\\"title\\": \\"...\\"}"}}]}
+        """
+        let data = Data(json.utf8)
+        let title = OpenAIClient.extractJSONTitle(from: data)
+        #expect(title == nil)
+    }
+
+    @Test
+    func extractJSONTitleRejectsPunctuationOnly() {
+        let json = """
+        {"choices":[{"message":{"content":"{\\"title\\": \\"...,,,\\"}"}}]}
+        """
+        let data = Data(json.utf8)
+        let title = OpenAIClient.extractJSONTitle(from: data)
+        #expect(title == nil)
+    }
+
+    @Test
+    func extractJSONTitleRejectsTooShort() {
+        let json = """
+        {"choices":[{"message":{"content":"{\\"title\\": \\"Hi\\"}"}}]}
+        """
+        let data = Data(json.utf8)
+        let title = OpenAIClient.extractJSONTitle(from: data)
+        #expect(title == nil)
+    }
 }
