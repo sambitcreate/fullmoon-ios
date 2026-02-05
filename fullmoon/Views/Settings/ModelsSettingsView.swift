@@ -15,9 +15,53 @@ struct ModelsSettingsView: View {
     @State private var isFetchingCloudModels = false
     @State private var cloudFetchError: String?
     @State private var newCloudModelName = ""
+    @State private var showCloudModelPicker = false
+    @State private var cloudModelSearchText = ""
+
+    private var filteredCloudModels: [String] {
+        let trimmedQuery = cloudModelSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else { return appManager.cloudModels }
+        return appManager.cloudModels.filter { $0.localizedCaseInsensitiveContains(trimmedQuery) }
+    }
+
+    private var selectedCloudModel: Binding<String> {
+        Binding(
+            get: { appManager.currentCloudModelName ?? appManager.cloudModels.first ?? "" },
+            set: { newValue in
+                guard !newValue.isEmpty else { return }
+                selectCloudModel(newValue)
+            }
+        )
+    }
     
     var body: some View {
         Form {
+            Section {
+                HStack(spacing: 16) {
+                    Toggle(isOn: $appManager.thinkingModeEnabled) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Thinking")
+                            Text("Adds the research harness to cloud prompts")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .tint(.blue)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Toggle(isOn: $appManager.webSearchEnabled) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Web search")
+                            Text("Lets cloud models call Exa for citations")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .tint(.blue)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+
             Section(header: Text("cloud endpoint")) {
                 TextField("API base URL (OpenAI-compatible)", text: $appManager.cloudAPIBaseURL)
                     #if os(iOS) || os(visionOS)
@@ -56,31 +100,28 @@ struct ModelsSettingsView: View {
                 if appManager.cloudModels.isEmpty {
                     Text("no cloud models yet")
                         .foregroundStyle(.secondary)
-                } else {
-                    ForEach(appManager.cloudModels, id: \.self) { modelName in
-                        Button {
-                            selectCloudModel(modelName)
-                        } label: {
-                            Label {
-                                Text(modelName)
-                                    .tint(.primary)
-                            } icon: {
-                                Image(systemName: appManager.currentModelSource == .cloud && appManager.currentCloudModelName == modelName ? "checkmark.circle.fill" : "circle")
-                            }
-                        }
-                        #if os(macOS)
-                        .buttonStyle(.borderless)
-                        #endif
+                } else if appManager.cloudModels.count > 10 {
+                    Button {
+                        showCloudModelPicker = true
+                    } label: {
+                        Label("select cloud model", systemImage: "chevron.up.chevron.down")
                     }
-                }
-            }
 
-            Section(header: Text("thinking mode")) {
-                Toggle("thinking mode", isOn: $appManager.thinkingModeEnabled)
-                    .tint(.blue)
-                Text("adds the agentic Exa research harness prompt to the system prompt for cloud models")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    HStack {
+                        Text("selected")
+                        Spacer()
+                        Text(appManager.currentCloudModelName ?? "none")
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Picker("cloud model", selection: selectedCloudModel) {
+                        ForEach(appManager.cloudModels, id: \.self) { modelName in
+                            Text(modelName)
+                                .tag(modelName)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
             }
 
             Section(header: Text("add custom model")) {
@@ -150,6 +191,31 @@ struct ModelsSettingsView: View {
                         }
                         #endif
                     }
+            }
+        }
+        .sheet(isPresented: $showCloudModelPicker) {
+            NavigationStack {
+                List {
+                    ForEach(filteredCloudModels, id: \.self) { modelName in
+                        Button {
+                            selectCloudModel(modelName)
+                            showCloudModelPicker = false
+                        } label: {
+                            HStack {
+                                Text(modelName)
+                                Spacer()
+                                if appManager.currentCloudModelName == modelName {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+                .navigationTitle("cloud models")
+                .if(appManager.cloudModels.count > 10) { view in
+                    view.searchable(text: $cloudModelSearchText, prompt: "search models")
+                }
             }
         }
     }

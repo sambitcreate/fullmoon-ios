@@ -184,11 +184,15 @@ struct ChatView: View {
                     ConversationView(thread: currentThread, generatingThreadID: generatingThreadID)
                 } else {
                     Spacer()
-                    Image(systemName: appManager.getMoonPhaseIcon())
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 32, height: 32)
-                        .foregroundStyle(.quaternary)
+                    VStack(spacing: 8) {
+                        Image(systemName: appManager.getMoonPhaseIcon())
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 32, height: 32)
+                        Text(appManager.currentModelDisplayName.isEmpty ? "model" : appManager.currentModelDisplayName)
+                            .font(.footnote)
+                    }
+                    .foregroundStyle(.quaternary)
                     Spacer()
                 }
 
@@ -204,7 +208,7 @@ struct ChatView: View {
             #endif
                 .sheet(isPresented: $showModelPicker) {
                     NavigationStack {
-                        ModelsSettingsView()
+                        ChatModelsSettingsView()
                             .environment(llm)
                         #if os(visionOS)
                             .toolbar {
