@@ -68,7 +68,7 @@ struct RequestLLMIntent: AppIntent {
                 output = String(output.prefix(maxCharacters)).trimmingCharacters(in: .whitespaces) + "..."
             }
 
-            let responseMessage = Message(role: .assistant, content: output, thread: thread)
+            let responseMessage = Message(role: .assistant, content: output, thread: thread, usedWebSearch: llm.lastUsedWebSearch)
             thread.messages.append(responseMessage)
 
             if continuous {
@@ -103,7 +103,7 @@ struct RequestLLMIntent: AppIntent {
                 output = String(output.prefix(maxCharacters)).trimmingCharacters(in: .whitespaces) + "..."
             }
 
-            let responseMessage = Message(role: .assistant, content: output, thread: thread)
+            let responseMessage = Message(role: .assistant, content: output, thread: thread, usedWebSearch: llm.lastUsedWebSearch)
             thread.messages.append(responseMessage)
 
             if continuous {

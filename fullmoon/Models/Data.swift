@@ -218,16 +218,18 @@ class Message {
     var content: String
     var timestamp: Date
     var generatingTime: TimeInterval?
+    var usedWebSearch: Bool?
     
     @Relationship(inverse: \Thread.messages) var thread: Thread?
     
-    init(role: Role, content: String, thread: Thread? = nil, generatingTime: TimeInterval? = nil) {
+    init(role: Role, content: String, thread: Thread? = nil, generatingTime: TimeInterval? = nil, usedWebSearch: Bool = false) {
         self.id = UUID()
         self.role = role
         self.content = content
         self.timestamp = Date()
         self.thread = thread
         self.generatingTime = generatingTime
+        self.usedWebSearch = usedWebSearch
     }
 }
 

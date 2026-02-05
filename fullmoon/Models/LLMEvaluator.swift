@@ -28,6 +28,7 @@ class LLMEvaluator {
     var thinkingTime: TimeInterval?
     var collapsed: Bool = false
     var isThinking: Bool = false
+    var lastUsedWebSearch: Bool = false
 
     var elapsedTime: TimeInterval? {
         if let startTime {
@@ -107,6 +108,7 @@ class LLMEvaluator {
         running = true
         cancelled = false
         output = ""
+        lastUsedWebSearch = false
         startTime = Date()
 
         do {
@@ -188,6 +190,7 @@ class LLMEvaluator {
         startTime = Date()
         isThinking = false
         thinkingTime = nil
+        lastUsedWebSearch = false
 
         defer {
             running = false
@@ -241,6 +244,7 @@ class LLMEvaluator {
                         let toolMessages = await handleToolCalls(toolCalls, apiKey: trimmedExaKey)
                         messages.append(.init(role: Role.assistant.rawValue, content: nil, toolCalls: toolCalls))
                         messages.append(contentsOf: toolMessages)
+                        lastUsedWebSearch = true
                         toolIterations += 1
                         continue
                     } else if outputText.isEmpty {

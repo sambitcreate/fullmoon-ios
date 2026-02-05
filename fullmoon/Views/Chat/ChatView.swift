@@ -308,7 +308,13 @@ struct ChatView: View {
                             webSearchEnabled: appManager.webSearchEnabled,
                             exaAPIKey: appManager.exaAPIKey
                         )
-                        sendMessage(Message(role: .assistant, content: output, thread: currentThread, generatingTime: llm.thinkingTime))
+                        sendMessage(Message(
+                            role: .assistant,
+                            content: output,
+                            thread: currentThread,
+                            generatingTime: llm.thinkingTime,
+                            usedWebSearch: llm.lastUsedWebSearch
+                        ))
                         generatingThreadID = nil
                     }
                 }

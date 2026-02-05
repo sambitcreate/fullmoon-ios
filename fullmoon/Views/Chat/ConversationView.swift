@@ -80,6 +80,19 @@ struct MessageView: View {
         .foregroundStyle(.secondary)
     }
 
+    var webSearchBadge: some View {
+        Text("web search")
+            .font(.caption2)
+            .fontWeight(.semibold)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .foregroundStyle(.white)
+            .background(
+                Capsule()
+                    .fill(Color.blue)
+            )
+    }
+
     var body: some View {
         HStack {
             if message.role == .user { Spacer() }
@@ -87,6 +100,9 @@ struct MessageView: View {
             if message.role == .assistant {
                 let (thinking, afterThink) = processThinkingContent(message.content)
                 VStack(alignment: .leading, spacing: 16) {
+                    if message.usedWebSearch {
+                        webSearchBadge
+                    }
                     if let thinking {
                         VStack(alignment: .leading, spacing: 12) {
                             thinkingLabel
