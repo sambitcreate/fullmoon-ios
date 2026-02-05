@@ -391,11 +391,14 @@ struct ConversationView: View {
             }
             .scrollPosition(id: $scrollID, anchor: .bottom)
             .onChange(of: llm.output) { _, _ in
-                // Throttle scroll updates to every 100ms
-                let now = Date()
-                if !scrollInterrupted && now.timeIntervalSince(lastScrollTime) > 0.1 {
-                    lastScrollTime = now
-                    scrollView.scrollTo("bottom")
+                // Don't auto-scroll when finalizing answer (user should see top first)
+                if !llm.isFinalizingAnswer {
+                    // Throttle scroll updates to every 100ms
+                    let now = Date()
+                    if !scrollInterrupted && now.timeIntervalSince(lastScrollTime) > 0.1 {
+                        lastScrollTime = now
+                        scrollView.scrollTo("bottom")
+                    }
                 }
 
                 if !llm.isThinking {
@@ -407,6 +410,12 @@ struct ConversationView: View {
                 // interrupt auto scroll to bottom if user scrolls away
                 if llm.running {
                     scrollInterrupted = true
+                }
+            }
+            .onChange(of: llm.isFinalizingAnswer) { wasFinalizing, isFinalizingNow in
+                // When final answer starts, scroll to top of output so user sees first block
+                if !wasFinalizing && isFinalizingNow {
+                    scrollView.scrollTo("output", anchor: .top)
                 }
             }
             .onChange(of: llm.running) { wasRunning, isRunning in
